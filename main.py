@@ -21,6 +21,8 @@ def main():
         cache=Cache(args.data_dir)
         scan=scan_game(args.game or detect_game(),cache=cache)
         cache.observe(scan)
+        from bridge.scan_cache import save_scan
+        save_scan(scan,args.data_dir)
         report=export_report(scan,args.data_dir)
         result={'summary':scan.summary(),'report':str(report)}
         if args.build: result['build']=install_pack(scan,args.data_dir)

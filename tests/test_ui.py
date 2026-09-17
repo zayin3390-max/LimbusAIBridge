@@ -209,6 +209,47 @@ class GuiTests(Fixture):
         self.assertTrue(self.app.key_entry.instate(['!disabled']))
         self.assertTrue(self.app.save_button.instate(['!disabled']))
 
+    def test_startup_schedules_cache_restore_never_scan_or_watch(self):
+        from bridge.gui import App
+        from bridge import settings
+        import tkinter as tk
+        known_timers=set(self.window.tk.call('after','info'))
+        window=tk.Toplevel(self.window);window.withdraw()
+        scheduled=[]
+        original=window.after
+        def record(delay,fn=None,*args):
+            scheduled.append((delay,getattr(fn,'__name__','')))
+            return original(delay,fn,*args)
+        with patch.object(window,'after',side_effect=record), \
+             patch('bridge.gui.settings.load',return_value=(dict(settings.DEFAULTS,game_path=str(self.game),monitor=True),'')):
+            app=App(window,self.data,autostart=True)
+        names=[name for _,name in scheduled]
+        self.assertIn('restore_scan',names)
+        self.assertNotIn('start_scan',names)
+        self.assertNotIn('watch',names)
+        self.assertFalse(app.monitor_var.get())
+        for token in set(window.tk.call('after','info'))-known_timers:window.after_cancel(token)
+        window.destroy()
+
+    def test_restore_scan_only_uses_snapshot_and_latest_translations(self):
+        from bridge.scan_cache import save_scan
+        save_scan(self.app.scan,self.data)
+        with patch('bridge.gui.scan_game',side_effect=AssertionError('No full scan')):
+            self.app.restore_scan();self.app.worker.join(timeout=10);self.app.poll()
+        self.assertIn('已读取缓存',self.app.status.get())
+        self.assertIsNotNone(self.app.scan)
+
+    def test_compact_layout_keeps_retranslation_and_report_in_menu(self):
+        with patch.object(self.window,'winfo_width',return_value=420), \
+             patch.object(self.window,'winfo_height',return_value=360):
+            self.app.adapt_layout()
+        hidden=self.app.command_panels['work'].hidden
+        self.assertIn(self.app.retranslate_button,hidden)
+        self.assertIn(self.app.report_button,hidden)
+        self.assertNotIn(self.app.overflow_button,hidden)
+        self.assertEqual(self.app.overflow_menu.entrycget(0,'label'),'重译所选')
+        self.assertEqual(self.app.overflow_menu.entrycget(1,'label'),'导出报告')
+
     def test_invalid_api_numbers_do_not_block_scan(self):
         self.app.api_vars['retries'].set('not a number')
         with patch.object(self.app,'run') as runner:

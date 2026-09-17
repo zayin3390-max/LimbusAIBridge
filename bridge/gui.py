@@ -9,8 +9,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from . import VERSION
 from . import settings
-from .core import (BridgeError, Cancelled, Cache, scan_game, signature, install_pack,
-                   export_report, game_running, detect_game, PACK_NAME, MARKER, PACK_RULES_VERSION, atomic_write)
+from .core import (BridgeError, Cancelled, Cache, scan_game, install_pack,
+                   export_report, PACK_NAME, atomic_write)
 from .provider import Client, translate, include_dependencies
 from .consistency import align_translations
 from .retranslation import retranslate,eligible as retranslation_eligible
@@ -31,8 +31,8 @@ HELP='''使用顺序
 
 零协会更新后
 
-本工具以本地 LLC_zh-CN 为基准。窗口保持打开时，每 60 秒检查一次本地文件；有变化且游戏已退出时自动重建独立包。新到的零协会译文优先，原有 AI 缓存保留备用。没有自动付费翻译，也不会自动下载零协会更新。
-关闭软件后不监控；下次打开会同步。若从原工具箱启动游戏，它可能把选定语言切回 LLC_zh-CN，此时在游戏启动页重新选择 LimbusAI_zh-CN。
+本工具以本地 LLC_zh-CN 为基准。启动只读取上次扫描缓存，不全面扫描，也不定时检查或自动生成包。游戏或汉化更新后，手动点击“扫描更新”，再生成语言包；新到的零协会译文优先，原有 AI 缓存保留备用。首次使用没有缓存时等待手动扫描。
+扫描缓存位于 data/scan-cache.json.gz；读取缓存时仍会加载最新保存的译文和忽略状态。实际翻译或生成包前核对游戏文件是否变化，过期则提示手动重扫。若从原工具箱启动游戏，它可能把选定语言切回 LLC_zh-CN，此时在游戏启动页重新选择 LimbusAI_zh-CN。
 
 如何识别新内容
 
@@ -72,7 +72,7 @@ Hana、Zwei、Tres、Shi、Cinq、Liu、Devyat'、Dieci、Öufi 等按原文拼�
 零协会已有译名优先；缺失处再使用个人术语、手动审校和已有 AI 定名。已知名称会在 API 请求中锁定。若本次勾选了尚未翻译、且会被正文引用的名称，先翻译名称，再按原有并行数处理正文；不会擅自发送未勾选条目。
 普通对白、同词异义、不同数值与硬币描述分别保留；Hana、Zwei 等协会数字专名的规则不变。正文中已识别的别译在原文确实提及对应术语时修正。无法确定的新别译列入「译名待核对」，可查看原文、参考语种并手动审校；导出报告会附上「译名一致性.md」及「译名对齐清单.csv」。
 原汉化不改写，原始缓存记录保留；在内存和生成的独立包中统一。完整人工名称优先于较短名称片段。此功能检查可识别的术语关系，不代替全文语义审校。
-升级后，退出游戏、关闭旧工具窗口，重新打开新版并点击「生成语言包」即可应用现有译文修复，无需重新付费翻译。开启自动同步时，新版也会在游戏退出后按新规则同步。
+升级后，退出游戏、关闭旧工具窗口，重新打开新版并点击「生成语言包」即可应用现有译文修复，无需重新付费翻译。游戏或汉化更新后，请先手动扫描。
 
 
 加速翻译
@@ -114,7 +114,7 @@ DANGER='#B44343'
 
 HELP_PAGES={
 '快速开始':"""1  扫描
-更新游戏和零协会汉化，选择游戏目录并扫描。
+启动读取上次扫描。首次使用或游戏／汉化更新后，手动点击“扫描更新”。
 
 2  翻译
 勾选需要的条目，填写 API 后点击“翻译所选”。
@@ -137,7 +137,7 @@ HELP_PAGES={
 软件会对齐可确认的名称及引用。疑似冲突列入“译名待核对”；语义仍需人工审阅。
 
 零协会更新后怎么办？
-开启自动同步时，工具会在游戏退出后重新合并。新汉化优先，AI 缓存保留。
+点击“扫描更新”，退出游戏后生成语言包。新汉化优先，AI 缓存保留。
 
 切换条目前要保存吗？
 编辑草稿会保留；点击“保存译文”并通过校验后，才会用于语言包。""",
@@ -159,6 +159,9 @@ Limbus AI Bridge · 个人补译工具
 源码采用 MIT；游戏文本、汉化与字体保留各自许可。"""
 }
 
+from .responsive import FlowFrame,ScrollFrame
+from .scan_cache import save_scan,load_scan
+
 class App:
     def __init__(self,root,directory,*,autostart=True):
         self.root=root;self.directory=pathlib.Path(directory)
@@ -169,7 +172,7 @@ class App:
         self.scan=None;self.checked=set();self.visible={};self.current=None
         self.filtered=[];self.page_index=0;self.page_size=200
         self.events=queue.Queue();self.stop=threading.Event();self.busy=False;self.worker=None
-        self.closing=False;self.watch_pending=False;self.last_watch_signature=''
+        self.closing=False;self.scan_saved_at=None
         self.controls=[];self.editables=[];self.job_entries=[];self.operation=''
         self._loading=False;self._editor_original='';self._search_after=None;self._draft_after=None
         self._last_progress_update=0
@@ -177,7 +180,7 @@ class App:
         root.title(f'边狱补译 · {VERSION}')
         width=min(1380,root.winfo_screenwidth()-60);height=min(880,root.winfo_screenheight()-80)
         root.geometry(f'{width}x{height}')
-        root.minsize(min(1040,width),min(660,height));root.configure(bg=BG)
+        root.minsize(min(360,width),min(320,height));root.configure(bg=BG)
         self.configure_styles();self.build_shell()
         self.build_work(self.pages['work'])
         self.build_settings(self.pages['settings']);self.build_help(self.pages['help'])
@@ -186,21 +189,24 @@ class App:
         root.bind('<Control-f>',self.focus_search);root.bind('<Control-s>',self.shortcut_save)
         root.bind('<F5>',lambda event:self.start_scan())
         root.after(100,self.poll)
+        root.bind('<Configure>',self.adapt_layout,add='+')
+        self.root.after_idle(self.adapt_layout)
         self.refresh()
         if self.drafts.error:self.write_log(self.drafts.error)
         if autostart:
-            root.after(450,self.start_scan);root.after(60000,self.watch)
+            root.after(150,self.restore_scan)
 
     def configure_styles(self):
         style=ttk.Style(self.root);style.theme_use('clam')
         style.configure('.',font=('Microsoft YaHei UI',10),background=BG,foreground=INK)
+        style.configure('Nav.TFrame',background=NAV)
         style.configure('TFrame',background=BG);style.configure('Paper.TFrame',background=PAPER)
         style.configure('TLabel',background=BG,foreground=INK)
         style.configure('Paper.TLabel',background=PAPER);style.configure('Muted.TLabel',foreground=MUTED)
         style.configure('Title.TLabel',font=('Microsoft YaHei UI',19,'bold'))
-        style.configure('TButton',padding=(13,8),background=PAPER,borderwidth=1,relief='flat')
+        style.configure('TButton',padding=(10,6),background=PAPER,borderwidth=1,relief='flat')
         style.map('TButton',background=[('active','#EAF0F2'),('disabled','#EEF1F3')],foreground=[('disabled','#98A1AA')])
-        style.configure('Primary.TButton',background=ACCENT,foreground='white',borderwidth=0,padding=(18,10))
+        style.configure('Primary.TButton',background=ACCENT,foreground='white',borderwidth=0,padding=(12,7))
         style.map('Primary.TButton',background=[('active','#1A6253'),('disabled','#E1E7E8')],
                   foreground=[('disabled','#909C9F'),('!disabled','white')])
         style.configure('Small.TButton',padding=(9,5))
@@ -222,43 +228,48 @@ class App:
         style.configure('TPanedwindow',background=LINE)
 
     def build_shell(self):
-        sidebar=tk.Frame(self.root,bg=NAV,width=170);sidebar.pack(side='left',fill='y');sidebar.pack_propagate(False)
-        tk.Label(sidebar,text='边狱补译',font=('Microsoft YaHei UI',18,'bold'),fg='#F7FAFC',bg=NAV).pack(anchor='w',padx=22,pady=(28,2))
-        tk.Label(sidebar,text='Limbus AI Bridge',font=('Segoe UI',9),fg='#94A8B5',bg=NAV).pack(anchor='w',padx=23,pady=(0,30))
-        self.nav_buttons={}
+        self.navbar=FlowFrame(self.root,style='Nav.TFrame',padding=(10,4))
+        self.navbar.pack(side='top',fill='x')
+        self.brand=tk.Label(self.navbar,text='边狱补译',font=('Microsoft YaHei UI',13,'bold'),
+                            fg='#F7FAFC',bg=NAV,padx=12)
+        self.navbar.add(self.brand);self.nav_buttons={}
         for key,label in [('work','翻译工作台'),('settings','API 设置'),('help','帮助')]:
-            button=tk.Button(sidebar,text=label,anchor='w',font=('Microsoft YaHei UI',11),padx=18,pady=12,
+            button=tk.Button(self.navbar,text=label,font=('Microsoft YaHei UI',10),padx=10,pady=8,
                              bg=NAV,fg='#C3CFD8',activebackground='#31424D',activeforeground='white',
-                             relief='flat',borderwidth=0,cursor='hand2',command=lambda key=key:self.show_page(key))
-            button.pack(fill='x',padx=10,pady=3);self.nav_buttons[key]=button
-        tk.Label(sidebar,text='v'+VERSION,font=('Segoe UI',9),fg='#94A8B5',bg=NAV).pack(side='bottom',anchor='w',padx=24,pady=20)
-        self.log_toggle=tk.Button(sidebar,text='运行记录',anchor='w',font=('Microsoft YaHei UI',10),padx=16,pady=10,
+                             relief='flat',borderwidth=0,command=lambda key=key:self.show_page(key))
+            self.navbar.add(button);self.nav_buttons[key]=button
+        self.log_toggle=tk.Button(self.navbar,text='运行记录',font=('Microsoft YaHei UI',10),padx=10,pady=8,
                                   bg=NAV,fg='#B5C4CE',activebackground='#31424D',activeforeground='white',
                                   relief='flat',borderwidth=0,command=self.toggle_log)
-        self.log_toggle.pack(side='bottom',fill='x',padx=10,pady=5)
-        main=ttk.Frame(self.root);main.pack(side='left',fill='both',expand=True)
+        self.navbar.add(self.log_toggle)
+        main=ttk.Frame(self.root);main.pack(fill='both',expand=True)
         self.status=tk.StringVar(value='就绪')
-        footer=ttk.Frame(main,padding=(24,8,24,12));footer.pack(side='bottom',fill='x')
+        footer=ttk.Frame(main,padding=(12,6,12,8));footer.pack(side='bottom',fill='x')
         status_row=ttk.Frame(footer);status_row.pack(fill='x')
         self.status_label=ttk.Label(status_row,textvariable=self.status,style='Muted.TLabel')
-        self.status_label.pack(side='left',fill='x',expand=True)
-        status_row.bind('<Configure>',lambda e:self.status_label.configure(wraplength=max(300,e.width-110)))
         self.stop_button=ttk.Button(status_row,text='停止',style='Small.TButton',command=self.request_stop,state='disabled')
         self.stop_button.pack(side='right',padx=(10,0))
+        self.status_label.configure(width=1)
+        self.status_label.pack(side='left',fill='x',expand=True)
         self.progress=ttk.Progressbar(footer,mode='determinate',maximum=100);self.progress.pack(fill='x',pady=(8,0))
-        self.log_frame=ttk.Frame(main,padding=(24,0,24,8))
-        self.log=tk.Text(self.log_frame,height=6,wrap='word',font=('Microsoft YaHei UI',9),relief='flat',
+        self.command_host=ttk.Frame(main,padding=(12,3,4,3));self.command_host.pack(side='bottom',fill='x')
+        self.command_panels={key:FlowFrame(self.command_host) for key in ('work','settings','help')}
+        self.log_frame=ttk.Frame(main,padding=(12,0,12,6))
+        self.log=tk.Text(self.log_frame,height=4,wrap='word',font=('Microsoft YaHei UI',9),relief='flat',
                          padx=12,pady=9,bg='#E9EEF1',fg='#52616E',state='disabled')
         scrollbar=ttk.Scrollbar(self.log_frame,command=self.log.yview);self.log.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side='right',fill='y');self.log.pack(fill='both',expand=True)
         self.page_host=ttk.Frame(main);self.page_host.pack(fill='both',expand=True)
-        self.pages={key:ttk.Frame(self.page_host,padding=(24,22,24,4)) for key in ('work','settings','help')}
+        self.pages={key:ttk.Frame(self.page_host,padding=(12,12,12,4)) for key in ('work','settings','help')}
 
     def show_page(self,key):
         for name,frame in self.pages.items():
             frame.pack_forget()
             self.nav_buttons[name].configure(bg='#354954' if name==key else NAV,fg='white' if name==key else '#C3CFD8')
         self.pages[key].pack(fill='both',expand=True);self.page=key
+        for panel in self.command_panels.values():panel.pack_forget()
+        self.command_panels[key].pack(fill='x')
+        self.command_panels[key].schedule()
         if hasattr(self,'key_entry'):
             self.key_entry.configure(show='●');self.key_button.configure(text='显示')
         if hasattr(self,'translate_button'):self.root.after_idle(self.update_actions)
@@ -266,23 +277,39 @@ class App:
     def button(self,parent,text,command,primary=False,*,small=False):
         widget=ttk.Button(parent,text=text,command=command,
                          style='Primary.TButton' if primary else 'Small.TButton' if small else 'TButton')
-        widget.pack(side='left',padx=(0,8));self.controls.append(widget);return widget
+        if isinstance(parent,FlowFrame):parent.add(widget)
+        else:widget.pack(side='left',padx=(0,8))
+        self.controls.append(widget);return widget
 
     def build_work(self,frame):
+        self.work_scroll=ScrollFrame(frame,BG);self.work_scroll.pack(fill='both',expand=True)
+        frame=self.work_scroll.body
+        actions=self.command_panels['work']
+        self.scan_button=self.button(actions,'扫描更新',self.start_scan)
+        self.translate_button=self.button(actions,'翻译所选',self.start_translate,primary=True)
+        self.retranslate_button=self.button(actions,'重译所选',self.start_retranslate)
+        self.build_button=self.button(actions,'生成语言包',self.start_build)
+        self.report_button=self.button(actions,'导出报告',self.report)
+        self.overflow_button=ttk.Menubutton(actions,text='更多操作',style='Small.TButton')
+        self.overflow_menu=tk.Menu(self.overflow_button,tearoff=False)
+        for label,fn in [('重译所选',self.start_retranslate),('导出报告',self.report),
+                         ('保存当前译文',self.save_manual),('还原当前译文',self.revert_draft)]:
+            self.overflow_menu.add_command(label=label,command=fn)
+        self.overflow_button.configure(menu=self.overflow_menu)
+        actions.add(self.overflow_button)
         head=ttk.Frame(frame);head.pack(fill='x')
         ttk.Label(head,text='翻译工作台',style='Title.TLabel').pack(side='left')
-        self.scan_button=ttk.Button(head,text='扫描更新',command=self.start_scan)
-        self.scan_button.pack(side='right');self.controls.append(self.scan_button)
         self.game_var=tk.StringVar(value=self.config['game_path'])
         path_row=ttk.Frame(frame);path_row.pack(fill='x',pady=(14,16))
         ttk.Label(path_row,text='游戏目录',style='Muted.TLabel').pack(side='left',padx=(0,10))
-        self.game_entry=ttk.Entry(path_row,textvariable=self.game_var)
+        choose=ttk.Button(path_row,text='选择',command=self.choose_game,style='Small.TButton')
+        choose.pack(side='right');self.controls.append(choose)
+        self.game_entry=ttk.Entry(path_row,textvariable=self.game_var,width=1)
         self.game_entry.pack(side='left',fill='x',expand=True,padx=(0,8));self.editables.append((self.game_entry,'normal'))
-        self.button(path_row,'选择',self.choose_game,small=True)
-        stats=ttk.Frame(frame);stats.pack(fill='x',pady=(0,14));self.stat_values={}
+        stats=FlowFrame(frame);stats.pack(fill='x',pady=(0,14));self.stat_values={}
         for key,label,mode in [('pending','待翻译','待补译'),('cached','已有译文','已有译文'),('failed','失败','失败项'),('review','译名待核对','译名待核对')]:
             card=tk.Frame(stats,bg=PAPER,highlightthickness=1,highlightbackground=LINE)
-            card.pack(side='left',fill='x',expand=True,padx=(0,8))
+            stats.add(card)
             value=tk.StringVar(value='—');self.stat_values[key]=value
             line=tk.Frame(card,bg=PAPER);line.pack(fill='x',padx=15,pady=10)
             number=tk.Label(line,textvariable=value,font=('Segoe UI',20,'bold'),bg=PAPER,fg=DANGER if key=='failed' else INK)
@@ -290,40 +317,47 @@ class App:
             text=tk.Label(line,text=label,font=('Microsoft YaHei UI',9),fg=MUTED,bg=PAPER);text.pack(side='left',padx=(12,0))
             for w in (card,line,number,text):
                 w.configure(cursor='hand2');w.bind('<Button-1>',lambda event,mode=mode:self.choose_mode(mode))
-        filters=ttk.Frame(frame);filters.pack(fill='x',pady=(0,10))
+        filters=FlowFrame(frame);filters.pack(fill='x',pady=(0,10))
         self.mode=tk.StringVar(value='待补译')
         combo=ttk.Combobox(filters,textvariable=self.mode,values=MODES,state='readonly',width=15)
-        combo.pack(side='left');combo.bind('<<ComboboxSelected>>',self.filter_changed)
+        filters.add(combo);combo.bind('<<ComboboxSelected>>',self.filter_changed)
         self.category=tk.StringVar(value='常用分类')
         self.category_vars={name:tk.BooleanVar(value=name!='其他') for name in CATEGORIES}
         combo=ttk.Combobox(filters,textvariable=self.category,values=('常用分类','所有分类')+CATEGORIES,state='readonly',width=12)
-        combo.pack(side='left',padx=8);combo.bind('<<ComboboxSelected>>',self.category_changed)
+        filters.add(combo);combo.bind('<<ComboboxSelected>>',self.category_changed)
         self.search=tk.StringVar()
-        self.search_entry=ttk.Entry(filters,textvariable=self.search,width=22)
-        self.search_entry.pack(side='right',fill='x',expand=True,padx=(10,0))
-        ttk.Label(filters,text='搜索',style='Muted.TLabel').pack(side='right')
+        search_row=ttk.Frame(filters);filters.add(search_row)
+        ttk.Label(search_row,text='搜索',style='Muted.TLabel').pack(side='left',padx=(0,6))
+        self.search_entry=ttk.Entry(search_row,textvariable=self.search,width=18)
+        self.search_entry.pack(side='left',fill='x',expand=True)
         self.search.trace_add('write',self.search_changed)
         self.search_entry.bind('<Escape>',lambda event:self.search.set(''))
         self.summary_var=tk.StringVar(value='')
-        pane=ttk.Panedwindow(frame,orient='horizontal');pane.pack(fill='both',expand=True);self.work_pane=pane
-        left=ttk.Frame(pane,style='Paper.TFrame');right=ttk.Frame(pane,style='Paper.TFrame',padding=14)
-        pane.add(left,weight=6);pane.add(right,weight=5)
+        pane=ttk.Frame(frame);pane.pack(fill='both',expand=True);self.work_pane=pane
+        left=ttk.Frame(pane,style='Paper.TFrame');right=ttk.Frame(pane,style='Paper.TFrame',padding=10)
+        self.list_panel=left;self.detail_panel=right
+        pane.columnconfigure(0,weight=6);pane.columnconfigure(1,weight=5)
+        left.grid(row=0,column=0,sticky='nsew',padx=(0,5))
+        right.grid(row=0,column=1,sticky='nsew',padx=(5,0))
         pane.bind('<Configure>',self.initial_split)
-        actions=ttk.Frame(left,style='Paper.TFrame',padding=(10,8));actions.pack(fill='x')
+        actions=FlowFrame(left,style='Paper.TFrame',padding=(8,6));actions.pack(fill='x')
         self.select_button=self.button(actions,'全选本页',self.select_visible,small=True)
         self.clear_button=self.button(actions,'清空选择',self.clear_visible,small=True)
         self.more_button=ttk.Menubutton(actions,text='更多',style='Small.TButton')
         menu=tk.Menu(self.more_button,tearoff=False);menu.add_command(label='选中全部筛选结果',command=self.select_filtered)
         menu.add_separator();menu.add_command(label='忽略所选',command=self.ignore_checked);menu.add_command(label='恢复所选',command=self.unignore_checked)
-        self.more_button.configure(menu=menu);self.more_button.pack(side='left');self.controls.append(self.more_button)
+        self.more_button.configure(menu=menu);actions.add(self.more_button);self.controls.append(self.more_button)
         self.list_host=ttk.Frame(left,style='Paper.TFrame');self.list_host.pack(fill='both',expand=True)
-        self.tree=ttk.Treeview(self.list_host,columns=('check','category','source','state'),show='headings',selectmode='browse')
+        self.tree=ttk.Treeview(self.list_host,columns=('check','category','source','state'),show='headings',selectmode='browse',height=8)
         for key,text,width,stretch in [('check','选择',46,False),('category','分类',74,False),('source','原文',300,True),('state','状态',92,False)]:
             self.tree.heading(key,text=text);self.tree.column(key,width=width,minwidth=120 if stretch else width,stretch=stretch)
         for name,fg in [('failed',DANGER),('cached',ACCENT),('ignored','#9AA4AD'),('pending',INK)]:self.tree.tag_configure(name,foreground=fg)
         self.tree.tag_configure('alternate',background='#F7F9FA')
         scroll=ttk.Scrollbar(self.list_host,orient='vertical',command=self.tree.yview);self.tree.configure(yscrollcommand=scroll.set)
-        scroll.pack(side='right',fill='y');self.tree.pack(fill='both',expand=True)
+        scroll.pack(side='right',fill='y')
+        hscroll=ttk.Scrollbar(self.list_host,orient='horizontal',command=self.tree.xview)
+        hscroll.pack(side='bottom',fill='x');self.tree.configure(xscrollcommand=hscroll.set)
+        self.tree.pack(fill='both',expand=True)
         self.tree.bind('<Button-1>',self.on_tree_click);self.tree.bind('<<TreeviewSelect>>',self.show_entry)
         self.tree.bind('<space>',self.toggle_focused)
         self.tree.bind('<Control-a>',lambda event:(self.select_visible(),'break')[-1])
@@ -333,10 +367,10 @@ class App:
         ttk.Label(self.empty,textvariable=self.empty_hint,style='Paper.TLabel',foreground=MUTED,wraplength=300,justify='center').pack()
         self.empty_action=ttk.Button(self.empty,text='查看所有条目',style='Small.TButton',command=lambda:self.choose_mode('所有条目'))
         self.empty_action.pack(pady=(14,0))
-        pages=ttk.Frame(left,style='Paper.TFrame',padding=(10,7));pages.pack(fill='x')
-        self.page_label=tk.StringVar();ttk.Label(pages,textvariable=self.page_label,style='Paper.TLabel',foreground=MUTED).pack(side='left')
-        self.next_button=ttk.Button(pages,text='下一页',style='Small.TButton',command=lambda:self.change_page(1));self.next_button.pack(side='right')
-        self.prev_button=ttk.Button(pages,text='上一页',style='Small.TButton',command=lambda:self.change_page(-1));self.prev_button.pack(side='right',padx=5)
+        pages=FlowFrame(left,style='Paper.TFrame',padding=(8,6));pages.pack(fill='x')
+        self.page_label=tk.StringVar();pages.add(ttk.Label(pages,textvariable=self.page_label,style='Paper.TLabel',foreground=MUTED))
+        self.next_button=ttk.Button(pages,text='下一页',style='Small.TButton',command=lambda:self.change_page(1));pages.add(self.next_button)
+        self.prev_button=ttk.Button(pages,text='上一页',style='Small.TButton',command=lambda:self.change_page(-1));pages.add(self.prev_button)
         titles=ttk.Frame(right,style='Paper.TFrame');titles.pack(fill='x')
         self.detail_title=tk.StringVar(value='条目详情');self.dirty_var=tk.StringVar()
         ttk.Label(titles,textvariable=self.detail_title,style='Paper.TLabel',font=('Microsoft YaHei UI',12,'bold')).pack(side='left')
@@ -348,23 +382,18 @@ class App:
         row=ttk.Frame(right,style='Paper.TFrame');row.pack(fill='x',pady=(0,5))
         ttk.Label(row,text='原文',style='Paper.TLabel').pack(side='left')
         self.reference_button=ttk.Button(row,text='参考语种',style='Small.TButton',command=self.toggle_reference);self.reference_button.pack(side='right')
-        self.showing_reference=False;self.original=self.text_box(right,8,readonly=True)
+        self.showing_reference=False;self.original=self.text_box(right,4,readonly=True)
         row=ttk.Frame(right,style='Paper.TFrame');row.pack(fill='x',pady=(12,5))
         ttk.Label(row,text='译文',style='Paper.TLabel').pack(side='left')
         self.save_button=ttk.Button(row,text='保存译文',style='Small.TButton',command=self.save_manual,state='disabled');self.save_button.pack(side='right')
         self.revert_button=ttk.Button(row,text='还原',style='Small.TButton',command=self.revert_draft,state='disabled');self.revert_button.pack(side='right',padx=6)
-        self.translation=self.text_box(right,8)
+        self.translation=self.text_box(right,5)
         self.translation.configure(undo=True,autoseparators=True,maxundo=80);self.translation.bind('<<Modified>>',self.editor_changed)
-        actions=ttk.Frame(frame);actions.pack(fill='x',pady=(14,4))
-        self.translate_button=self.button(actions,'翻译所选',self.start_translate,primary=True)
-        self.retranslate_button=self.button(actions,'重译所选',self.start_retranslate)
-        self.build_button=self.button(actions,'生成语言包',self.start_build)
-        self.report_button=self.button(actions,'导出报告',self.report)
         self.selected_var=tk.StringVar(value='未选择条目');ttk.Label(frame,textvariable=self.selected_var,style='Muted.TLabel').pack(anchor='w',pady=(0,3))
         meta=ttk.Frame(frame);meta.pack(fill='x',pady=(4,0))
         ttk.Label(meta,textvariable=self.summary_var,style='Muted.TLabel').pack(side='left')
-        self.monitor_var=tk.BooleanVar(value=self.config.get('monitor',True))
-        self.sync_check=ttk.Checkbutton(meta,text='自动同步汉化更新',variable=self.monitor_var);self.sync_check.pack(side='right')
+        self.monitor_var=tk.BooleanVar(value=False) # old configs cannot re-enable periodic work
+        self.work_scroll.bind_children()
 
     def text_box(self,parent,height,readonly=False):
         holder=ttk.Frame(parent,style='Paper.TFrame');holder.pack(fill='both',expand=True)
@@ -396,11 +425,11 @@ class App:
         def label(text,row,parent=form):
             ttk.Label(parent,text=text,style='Paper.TLabel').grid(row=row,column=0,sticky='w',padx=(0,22),pady=9)
         label('API 地址',0)
-        address=ttk.Entry(form,textvariable=self.api_vars['api_base'])
+        address=ttk.Entry(form,textvariable=self.api_vars['api_base'],width=1)
         address.grid(row=0,column=1,columnspan=2,sticky='ew',pady=9);self.editables.append((address,'normal'))
         label('API Key',1)
         self.key_var=tk.StringVar(value=self.api_key)
-        self.key_entry=ttk.Entry(form,textvariable=self.key_var,show='●')
+        self.key_entry=ttk.Entry(form,textvariable=self.key_var,show='●',width=1)
         self.key_entry.grid(row=1,column=1,sticky='ew',pady=9);self.editables.append((self.key_entry,'normal'))
         self.key_button=ttk.Button(form,text='显示',style='Small.TButton',command=self.toggle_key)
         self.key_button.grid(row=1,column=2,padx=(8,0));self.controls.append(self.key_button)
@@ -408,7 +437,7 @@ class App:
         remember=ttk.Checkbutton(form,text='记住密钥（Windows 加密）',variable=self.remember_var,style='Paper.TCheckbutton')
         remember.grid(row=2,column=1,columnspan=2,sticky='w',pady=(0,12));self.editables.append((remember,'normal'))
         label('模型',3)
-        self.model_combo=ttk.Combobox(form,textvariable=self.api_vars['model'])
+        self.model_combo=ttk.Combobox(form,textvariable=self.api_vars['model'],width=1)
         self.model_combo.grid(row=3,column=1,sticky='ew',pady=9);self.editables.append((self.model_combo,'normal'))
         fetch=ttk.Button(form,text='获取列表',style='Small.TButton',command=self.fetch_models)
         fetch.grid(row=3,column=2,padx=(8,0));self.controls.append(fetch)
@@ -432,9 +461,9 @@ class App:
         self.json_var=tk.BooleanVar(value=self.config.get('json_mode',False))
         json_check=ttk.Checkbutton(self.advanced,text='JSON 输出模式',variable=self.json_var,style='Paper.TCheckbutton')
         json_check.grid(row=7,column=1,sticky='w',pady=12);self.editables.append((json_check,'normal'))
-        buttons=ttk.Frame(form,style='Paper.TFrame');buttons.grid(row=6,column=0,columnspan=3,sticky='w',pady=(22,8))
-        self.button(buttons,'保存设置',self.save_settings,primary=True)
-        self.button(buttons,'测试连接',self.test_api)
+        buttons=self.command_panels['settings']
+        self.settings_save_button=self.button(buttons,'保存设置',self.save_settings,primary=True)
+        self.test_button=self.button(buttons,'测试连接',self.test_api)
         ttk.Label(form,text='连接测试会发送一条短请求，消耗少量 API 额度。',style='Paper.TLabel',foreground=MUTED).grid(row=7,column=0,columnspan=3,sticky='w',pady=8)
         self.api_status=tk.StringVar(value='')
         ttk.Label(form,textvariable=self.api_status,style='Paper.TLabel',foreground=ACCENT,wraplength=650).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
@@ -442,16 +471,48 @@ class App:
             widget.bind('<MouseWheel>',wheel)
             for child in widget.winfo_children():bind_wheel(child)
         bind_wheel(form);canvas.bind('<MouseWheel>',wheel)
+        original={w:{k:v for k,v in w.grid_info().items() if k in ('row','column','columnspan','sticky','padx','pady')}
+                  for parent in (form,self.advanced) for w in parent.winfo_children() if w.grid_info()}
+        original[self.advanced]={'row':5,'column':0,'columnspan':3,'sticky':'ew'}
+        notes=[w for w in form.winfo_children() if isinstance(w,ttk.Label) and int(w.grid_info().get('row',0))>=7]
+        def resize_form(event):
+            canvas.itemconfigure(window,width=event.width)
+            narrow=event.width<620
+            for w,layout in original.items():
+                item=dict(layout);r=int(item['row']);c=int(item['column'])
+                if narrow:
+                    if w.master is form:
+                        if r in (0,1,3):
+                            start={0:0,1:2,3:5}[r]
+                            item.update(row=start+(c!=0),column=0 if c<2 else 2,
+                                        columnspan=3 if c==0 or r==0 else 2 if c==1 else 1)
+                        else:
+                            item.update(row={2:4,4:7,5:8,7:9,8:10}.get(r,r),column=0,columnspan=3)
+                    else:
+                        if r<=5:
+                            item.update(row=r*2+(c!=0),column=0 if c<2 else 2,
+                                        columnspan=3 if c==0 or r==5 else 2 if c==1 else 1)
+                        else:item.update(row=r+6,column=0,columnspan=3)
+                w.grid_configure(**item)
+            # grid_configure must not reopen collapsed advanced controls.
+            if not self.advanced_open:self.advanced.grid_remove()
+            form.columnconfigure(0,weight=1 if narrow else 0)
+            self.advanced.columnconfigure(0,weight=1 if narrow else 0)
+            for w in notes:w.configure(wraplength=max(180,event.width-50))
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        canvas.bind('<Configure>',resize_form)
 
     def build_help(self,frame):
         ttk.Label(frame,text='帮助',style='Title.TLabel').pack(anchor='w',pady=(0,20))
-        tabs=ttk.Notebook(frame);tabs.pack(fill='both',expand=True)
-        for title,content in HELP_PAGES.items():
-            page=ttk.Frame(tabs,padding=16,style='Paper.TFrame');tabs.add(page,text=title)
-            box=self.text_box(page,20);box.insert('1.0',content);box.configure(state='disabled')
-        row=ttk.Frame(frame);row.pack(fill='x',pady=(14,0))
+        topic=tk.StringVar(value=next(iter(HELP_PAGES)))
+        picker=ttk.Combobox(frame,textvariable=topic,values=list(HELP_PAGES),state='readonly',width=1)
+        picker.pack(fill='x',pady=(0,10))
+        box=self.text_box(frame,12,readonly=True)
+        def changed(event=None):self.set_text(box,HELP_PAGES[topic.get()],'disabled')
+        picker.bind('<<ComboboxSelected>>',changed);changed()
+        row=self.command_panels['help']
         self.button(row,'打开数据目录',lambda:os.startfile(str(self.directory)))
-        self.button(row,'导出词表与语料',self.export_glossary)
+        self.help_export_button=self.button(row,'导出词表与语料',self.export_glossary)
 
     def export_glossary(self):
         if self.busy:return
@@ -467,6 +528,7 @@ class App:
         if self.log_open:self.log_frame.pack(side='bottom',fill='x',before=self.page_host)
         else:self.log_frame.pack_forget()
         self.log_toggle.configure(text='收起记录' if self.log_open else '运行记录')
+        self.adapt_layout()
 
     def toggle_advanced(self):
         self.advanced_open=not self.advanced_open
@@ -490,8 +552,32 @@ class App:
         return 'break'
 
     def initial_split(self,event):
-        if event.width>600 and not getattr(self,'_split_initialized',False):
-            self.work_pane.sashpos(0,int(event.width*.54));self._split_initialized=True
+        stacked=event.width<800
+        if stacked==getattr(self,'_stacked',None):return
+        self._stacked=stacked
+        self.work_pane.columnconfigure(1,weight=0 if stacked else 5)
+        self.list_panel.grid_configure(row=0,column=0,columnspan=2 if stacked else 1,padx=(0,0 if stacked else 5))
+        self.detail_panel.grid_configure(row=1 if stacked else 0,column=0 if stacked else 1,
+                                         columnspan=2 if stacked else 1,padx=(0 if stacked else 5,0),pady=(10 if stacked else 0,0))
+
+    def adapt_layout(self,event=None):
+        if event is not None and event.widget is not self.root:return
+        compact=self.root.winfo_width()<850 or self.root.winfo_height()<560
+        self.navbar.set_hidden([self.brand] if compact else [])
+        hidden=[self.retranslate_button,self.report_button] if compact else [self.overflow_button]
+        self.command_panels['work'].set_hidden(hidden)
+        tight=self.root.winfo_width()<600
+        self._tight=tight
+        self.scan_button.configure(text='扫描' if tight else '扫描更新',width=0)
+        count=len(self.selected_entries()) if self.scan else 0
+        self.translate_button.configure(text='翻译' if tight else f'翻译所选 · {count}' if count else '翻译所选',width=0)
+        self.build_button.configure(text='生成包' if tight else '生成语言包',width=0)
+        self.overflow_button.configure(text='更多' if tight else '更多操作',width=0)
+        for key,label in [('work','工作台' if tight else '翻译工作台'),('settings','设置' if tight else 'API 设置')]:
+            self.nav_buttons[key].configure(text=label)
+        self.log_toggle.configure(text=('收起' if self.log_open else '记录') if tight else ('收起记录' if self.log_open else '运行记录'))
+        self.command_panels['work'].schedule()
+        self.navbar.schedule()
 
     def choose_mode(self,mode):
         self.mode.set(mode);self.search.set('');self.category.set('所有分类');self.category_changed()
@@ -520,7 +606,7 @@ class App:
             except ValueError:raise BridgeError(f'{title}需要填写整数')
             if not low<=config[key]<=high:raise BridgeError(f'{title}应在 {low}–{high} 之间')
         config.update(game_path=self.game_var.get().strip(),remember_key=self.remember_var.get(),
-                      json_mode=self.json_var.get(),monitor=self.monitor_var.get())
+                      json_mode=self.json_var.get(),monitor=False)
         return config,self.key_var.get().strip()
 
     def save_settings(self):
@@ -568,7 +654,11 @@ class App:
         self.progress.configure(mode='indeterminate');self.progress.start(12)
         self.write_log(f'正在{operation}…')
         def task():
-            try:self.events.put(('done',(callback,fn())))
+            try:
+                result=fn()
+                if self.scan is not None and operation in ('翻译','重译','生成语言包','导出报告'):
+                    save_scan(self.scan,self.directory)
+                self.events.put(('done',(callback,result)))
             except Cancelled as exc:self.events.put(('cancel',str(exc)))
             except Exception as exc:self.events.put(('error',exc))
         self.worker=threading.Thread(target=task,daemon=True);self.worker.start()
@@ -604,25 +694,33 @@ class App:
         if not game:self.write_log('请先选择游戏目录');return
         def work():
             scan=scan_game(game,baseline or None,self.config['source_lang'],self.cache,self.stop,self.emit)
-            self.cache.observe(scan);return scan
+            self.cache.observe(scan);save_scan(scan,self.directory);return scan
         self.run(work,self.scanned,'扫描')
 
-    def scanned(self,scan):
-        self.remember_draft();self.current=None;self.scan=scan;self.last_watch_signature=scan.signature
+    def restore_scan(self):
+        if self.busy:return
+        game=self.game_var.get().strip()
+        if not game:return
+        base=self.api_vars['baseline_path'].get().strip()
+        def done(result):
+            if result:
+                scan,when=result
+                self.scanned(scan,cached_at=when)
+            else:self.write_log('尚无此目录的扫描缓存，点击“扫描更新”开始')
+        self.run(lambda:load_scan(self.directory,game,base or None,self.config['source_lang'],self.cache),
+                 done,'读取上次扫描')
+
+    def scanned(self,scan,cached_at=None):
+        self.remember_draft();self.current=None;self.scan=scan
+        self.scan_saved_at=cached_at or time.time()
         self.checked={e.uid for e in scan.entries if e.needs_translation and e.category!='其他'}
         self.page_index=0;self.refresh()
         gaps=sum(e.coverage_gap and e.status not in ('cached','ignored') for e in scan.entries)
-        self.write_log(f'扫描完成 · 待翻译 {len(self.checked)} 条'+(f' · 探索缺漏 {gaps} 条' if gaps else ''))
+        prefix=('已读取缓存 · '+time.strftime('%m-%d %H:%M',time.localtime(cached_at))) if cached_at else '扫描完成'
+        self.write_log(f'{prefix} · 待翻译 {len(self.checked)} 条'+(f' · 探索缺漏 {gaps} 条' if gaps else ''))
         for message in scan.warnings:self.write_log(message,announce=False)
         changes=len({r['uid'] for r in scan.consistency_changes})
         if changes:self.write_log(f'已对齐 {changes} 个译名字段，生成语言包后生效',announce=False)
-        marker=scan.game/'LimbusCompany_Data/Lang'/PACK_NAME/MARKER
-        if self.monitor_var.get() and marker.exists():
-            try:
-                metadata=json.loads(marker.read_text(encoding='utf-8'))
-                if metadata.get('source_signature')!=scan.signature or metadata.get('pack_rules_version',0)!=PACK_RULES_VERSION:
-                    self.watch_pending=True;self.root.after(250,self.sync_pending)
-            except (ValueError,OSError):pass
 
     def matches(self,entry):
         return matches(entry,self.mode.get(),{c for c,v in self.category_vars.items() if v.get()},self.search.get())
@@ -686,13 +784,12 @@ class App:
                    if not self.matches(e))
         self.selected_var.set(f'待译 {len(rows)} 条 · 重译 {len(old)} 条'+(f' · 筛选外 {hidden} 条' if hidden else '') if rows or old else '未选择条目')
         self.retranslate_button.configure(text=f'重译所选 · {len(old)}' if old else '重译所选')
-        self.translate_button.configure(text=f'翻译所选 · {len(rows)}' if rows else '翻译所选')
+        self.translate_button.configure(text='翻译' if getattr(self,'_tight',False) else f'翻译所选 · {len(rows)}' if rows else '翻译所选')
         self.update_actions()
 
     def update_actions(self):
         for button in self.controls:button.configure(state='disabled' if self.busy else 'normal')
         for entry,state in self.editables:entry.configure(state='disabled' if self.busy else state)
-        self.sync_check.configure(state='disabled' if self.busy else 'normal')
         available=bool(self.scan) and not self.busy
         for button in (self.build_button,self.report_button,self.more_button):
             button.configure(state='normal' if available else 'disabled')
@@ -707,6 +804,10 @@ class App:
         self.revert_button.configure(state='normal' if editable and dirty else 'disabled')
         self.reference_button.configure(state='normal' if self.current and (self.current.refs or self.current.target) else 'disabled')
         self.dirty_var.set('未保存' if dirty else '')
+        for index,enabled in enumerate((available and bool(self.selected_retranslations()),
+                                        available,editable and dirty,editable and dirty)):
+            self.overflow_menu.entryconfigure(index,state='normal' if enabled else 'disabled')
+        self.command_panels['work'].schedule()
 
     def toggle_checked(self,iid):
         if self.busy or iid not in self.visible:return
@@ -861,7 +962,6 @@ class App:
         return False
 
     def built(self,result):
-        self.watch_pending=False
         self.write_log(f'语言包已生成 · {result["ai_entries"]} 条补译 · 游戏中选择 {PACK_NAME}')
 
     def report(self):
@@ -869,7 +969,10 @@ class App:
         def done(path):
             self.write_log(f'报告已保存：{path}')
             os.startfile(str(path))
-        self.run(lambda:export_report(self.scan,self.directory),done,'导出报告')
+        def work():
+            align_translations(self.scan)
+            return export_report(self.scan,self.directory)
+        self.run(work,done,'导出报告')
 
     def test_api(self):
         if self.busy:return
@@ -888,27 +991,6 @@ class App:
             self.model_combo.configure(values=models);self.api_status.set(f'已获取 {len(models)} 个模型')
             self.write_log(f'已获取 {len(models)} 个模型')
         self.run(client.models,done,'获取模型')
-
-    def sync_pending(self):
-        if self.busy or not self.scan or not self.watch_pending or not self.monitor_var.get():return
-        if not self.match_scan_paths(announce=False):return
-        def work():
-            if game_running():return None
-            return install_pack(self.scan,self.directory,self.stop,self.emit)
-        def done(result):
-            if result:self.built(result)
-            else:self.write_log('等待游戏退出后同步语言包')
-        self.run(work,done,'同步语言包')
-
-    def watch(self):
-        self.root.after(60000,self.watch)
-        if self.busy or not self.monitor_var.get() or not self.scan:return
-        if not self.match_scan_paths(announce=False):return
-        if self.watch_pending:self.sync_pending();return
-        def done(sig):
-            if sig!=self.last_watch_signature:self.start_scan()
-            else:self.status.set('就绪')
-        self.run(lambda:signature(self.scan.game,self.scan.baseline,self.scan.source_lang),done,'检查更新')
 
     def on_close(self):
         self.remember_draft();self.flush_drafts()

@@ -6,7 +6,7 @@ import pathlib
 from ctypes import wintypes
 from .core import BridgeError, atomic_write, dumps, detect_game
 
-DEFAULTS={'game_path':'','baseline_path':'','source_lang':'en','api_base':'','model':'','timeout':120,'retries':10,'retry_policy_version':1,'batch_size':12,'concurrency':2,'batch_chars':6500,'max_tokens':8192,'interval':0.3,'json_mode':False,'monitor':True,'remember_key':False}
+DEFAULTS={'game_path':'','baseline_path':'','source_lang':'en','api_base':'','model':'','timeout':120,'retries':10,'retry_policy_version':1,'batch_size':12,'concurrency':2,'batch_chars':6500,'max_tokens':8192,'interval':0.3,'json_mode':False,'monitor':False,'remember_key':False}
 
 class Blob(ctypes.Structure):
     _fields_=[('cbData',wintypes.DWORD),('pbData',ctypes.POINTER(ctypes.c_char))]

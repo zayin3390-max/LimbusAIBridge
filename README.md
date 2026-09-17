@@ -1,6 +1,6 @@
 # 边狱补译 · Limbus AI Bridge
 
-个人用《Limbus Company》临时补译工具，版本 **1.2.2**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
+个人用《Limbus Company》临时补译工具，版本 **1.2.3**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
 
 [下载 Windows 版](https://github.com/zayin3390-max/LimbusAIBridge/releases/latest)
 
@@ -16,6 +16,8 @@
 - 已有 AI／手动译文可勾选后“重译所选”；调用前备份旧结果，失败或停止时保留未完成条目的旧译文，失败状态可在重启后继续查看。
 - 网络失败和校验失败自动重试，每条最多重试 10 次；支持 1–4 批并行及成功结果缓存。
 - 角色语料：从本地人工汉化配对检索同角色、同人格和相近句式，参考有出处的称呼与常用表达；帮助页可导出逐角色对照文档。
+- 扫描结果持久缓存：启动只读取缓存，不自动扫描或定时检查；更新后手动扫描。
+- 小窗口适配：固定操作栏、按钮换行与滚动内容，重译／报告在紧凑布局中收纳到“更多操作”。
 - 分语境词汇表：80 个核心术语、15 位主要角色语气与本地原译对照；按本地汉化提取良秀缩写范例，新释义进入“译名待核对”。[查看词汇表](docs/GLOSSARY.md)。
 - 跨界面译名一致性：统一状态与弹窗、技能等级、正文引用及剧情名称。先确定被正文引用的新名称，再继续并行翻译。
 - 保留 Hana、Zwei 等协会数字专名；校验数字、引擎标记、变量、富文本和换行。
@@ -52,19 +54,19 @@
 
     python -m venv .venv
     .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.2.2 --distpath release --workpath build-v122 main.py
+    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.2.3 --distpath release --workpath build-v123 main.py
 
 可执行程序独立启动自检：
 
-    .\release\LimbusAIBridge-1.2.2.exe --self-test --data-dir .\research\self-test
+    .\release\LimbusAIBridge-1.2.3.exe --self-test --data-dir .\research\self-test
 
-1.2.2 已通过 250 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互、草稿恢复与探索资源支持。测试使用临时夹具，不调用真实翻译 API。
+1.2.3 已通过 261 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互、草稿恢复与探索资源支持。测试使用临时夹具，不调用真实翻译 API。
 
 ## 数据与隐私
 
 仓库仅包含工具源码、测试、文档和构建配置。个人设置、密钥、译文缓存、日志、本机验收资料、游戏文本、零协会译文、字体和生成包均不进入 Git。
 
-工具从本机读取游戏与语言包。翻译时只发送用户所选条目及相关上下文、参考语种、术语及检索到的少量人工原译对照给所配置的服务商。后台同步只合并本地语言包，不自动调用付费 API。
+工具从本机读取游戏与语言包。翻译时只发送用户所选条目及相关上下文、参考语种、术语及检索到的少量人工原译对照给所配置的服务商。启动和定时任务不会扫描或调用付费 API；翻译、扫描和生成包均由用户发起。
 
 ## 资料与许可
 
