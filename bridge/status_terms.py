@@ -71,7 +71,9 @@ def align_status_terms(scan):
                 candidates.append(s)
             if not candidates: continue
             manual=[s for s in candidates if s['entry'].translation_model=='manual']
-            chosen=min(manual,key=lambda s:(-s['entry'].translation_created,rank_file(s['file']))) if manual else min(candidates,key=lambda s:rank_file(s['file']))
+            revised=[s for s in candidates if s['entry'].translation_model.startswith('retranslate:')]
+            preferred=manual or revised
+            chosen=min(preferred,key=lambda s:(-s['entry'].translation_created,rank_file(s['file']))) if preferred else min(candidates,key=lambda s:rank_file(s['file']))
             e=chosen['entry'];value=e.translation
             model=e.translation_model;created=e.translation_created
             origin='manual' if manual else 'cache'
@@ -90,6 +92,7 @@ def align_status_terms(scan):
         if len({s['file'].casefold() for s in slots})<2: continue
         for s in editable:
             e=s['entry']
+            if e.uid in scan.force_translation_ids and e.status!='cached':continue
             if e.translation==value and e.status=='cached': continue
             change={**item,'file':e.file,'path':list(e.path),'uid':e.uid,
                     'previous':e.translation,'reused':e.status!='cached'}

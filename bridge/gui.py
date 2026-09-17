@@ -13,6 +13,7 @@ from .core import (BridgeError, Cancelled, Cache, scan_game, signature, install_
                    export_report, game_running, detect_game, PACK_NAME, MARKER, PACK_RULES_VERSION, atomic_write)
 from .provider import Client, translate, include_dependencies
 from .consistency import align_translations
+from .retranslation import retranslate,eligible as retranslation_eligible
 from .ui_model import DraftStore, MODES, FIELD_LABELS, matches, selected, preview
 
 CATEGORIES=('人格','E.G.O','主线剧情','敌方','卡池','关联术语','其他')
@@ -127,6 +128,9 @@ HELP_PAGES={
 
 翻译失败怎么办？
 临时错误和校验失败会自动重试，最多 10 次。达到上限后处理后续条目；修正设置后可在“失败项”中重新勾选。
+
+如何重译已有内容？
+扫描后切到“已有译文”或“译名待核对”，勾选条目，再点击“重译所选”。更多菜单可选中全部筛选结果。重译会调用 API 并消耗额度；旧译文先备份，失败时保留。完成后生成语言包。
 
 为什么名称会不同？
 软件会对齐可确认的名称及引用。疑似冲突列入“译名待核对”；语义仍需人工审阅。
@@ -352,9 +356,10 @@ class App:
         self.translation.configure(undo=True,autoseparators=True,maxundo=80);self.translation.bind('<<Modified>>',self.editor_changed)
         actions=ttk.Frame(frame);actions.pack(fill='x',pady=(14,4))
         self.translate_button=self.button(actions,'翻译所选',self.start_translate,primary=True)
+        self.retranslate_button=self.button(actions,'重译所选',self.start_retranslate)
         self.build_button=self.button(actions,'生成语言包',self.start_build)
         self.report_button=self.button(actions,'导出报告',self.report)
-        self.selected_var=tk.StringVar(value='未选择条目');ttk.Label(actions,textvariable=self.selected_var,style='Muted.TLabel').pack(side='right')
+        self.selected_var=tk.StringVar(value='未选择条目');ttk.Label(frame,textvariable=self.selected_var,style='Muted.TLabel').pack(anchor='w',pady=(0,3))
         meta=ttk.Frame(frame);meta.pack(fill='x',pady=(4,0))
         ttk.Label(meta,textvariable=self.summary_var,style='Muted.TLabel').pack(side='left')
         self.monitor_var=tk.BooleanVar(value=self.config.get('monitor',True))
@@ -633,8 +638,8 @@ class App:
         states={'pending':'待翻译','cached':'已保存','ignored':'已忽略','failed':'失败'}
         for i,e in enumerate(self.filtered[start:start+self.page_size]):
             iid=str(start+i);self.visible[iid]=e
-            self.tree.insert('','end',iid=iid,values=('✓' if e.uid in self.checked else '',e.category,preview(e),states.get(e.status,e.status)),
-                             tags=(e.status,'alternate' if i%2 else ''))
+            self.tree.insert('','end',iid=iid,values=('✓' if e.uid in self.checked else '',e.category,preview(e),('重译失败' if e.retranslation_error else states.get(e.status,e.status))),
+                             tags=('failed' if e.retranslation_error else e.status,'alternate' if i%2 else ''))
         total=len(self.filtered);pages=max(1,(total+self.page_size-1)//self.page_size)
         self.page_label.set(f'{total:,} 条 · {self.page_index+1} / {pages} 页')
         self.prev_button.configure(state='normal' if self.page_index else 'disabled')
@@ -656,7 +661,7 @@ class App:
         entries=self.scan.entries if self.scan else []
         for key,number in [('pending',sum(e.needs_translation for e in entries)),
                            ('cached',sum(e.status=='cached' for e in entries)),
-                           ('failed',sum(e.status=='failed' for e in entries)),
+                           ('failed',sum(e.status=='failed' or bool(e.retranslation_error) for e in entries)),
                            ('review',sum(bool(e.consistency_note) for e in entries))]:
             self.stat_values[key].set(f'{number:,}' if self.scan else '—')
         self.summary_var.set(f'零协会 {self.scan.version}' if self.scan else '')
@@ -670,11 +675,16 @@ class App:
         rows=selected(self.scan.entries,self.checked)
         return [e for e in include_dependencies(rows,self.scan) if e.status not in ('cached','ignored')] if rows else []
 
+    def selected_retranslations(self):
+        return [e for e in self.scan.entries if e.uid in self.checked and retranslation_eligible(e)] if self.scan else []
+
     def update_selection_count(self):
         rows=self.selected_entries()
-        hidden=sum(e.uid in self.checked and e.status not in ('cached','ignored') for e in (self.scan.entries if self.scan else [])
+        old=self.selected_retranslations()
+        hidden=sum(e.uid in self.checked and (e.status not in ('cached','ignored') or retranslation_eligible(e)) for e in (self.scan.entries if self.scan else [])
                    if not self.matches(e))
-        self.selected_var.set(f'已选 {len(rows)} 条'+(f' · 筛选外 {hidden} 条' if hidden else '') if rows else '未选择待译条目')
+        self.selected_var.set(f'待译 {len(rows)} 条 · 重译 {len(old)} 条'+(f' · 筛选外 {hidden} 条' if hidden else '') if rows or old else '未选择条目')
+        self.retranslate_button.configure(text=f'重译所选 · {len(old)}' if old else '重译所选')
         self.translate_button.configure(text=f'翻译所选 · {len(rows)}' if rows else '翻译所选')
         self.update_actions()
 
@@ -688,6 +698,7 @@ class App:
         self.select_button.configure(state='normal' if self.visible and not self.busy else 'disabled')
         self.clear_button.configure(state='normal' if self.checked and not self.busy else 'disabled')
         self.translate_button.configure(state='normal' if available and self.selected_entries() else 'disabled')
+        self.retranslate_button.configure(state='normal' if available and self.selected_retranslations() else 'disabled')
         editable=bool(self.current) and not self.busy
         dirty=bool(self.current) and self.translation.get('1.0','end-1c')!=self.current.translation
         self.translation.configure(state='normal' if editable else 'disabled')
@@ -716,13 +727,13 @@ class App:
     def select_visible(self):
         if self.busy:return
         for e in self.visible.values():
-            if self.mode.get()=='已忽略' or e.status not in ('cached','ignored'):self.checked.add(e.uid)
+            if self.mode.get()=='已忽略' or e.status not in ('cached','ignored') or retranslation_eligible(e):self.checked.add(e.uid)
         self.refresh()
 
     def select_filtered(self):
         if self.busy:return
         for e in self.filtered:
-            if self.mode.get()=='已忽略' or e.status not in ('cached','ignored'):self.checked.add(e.uid)
+            if self.mode.get()=='已忽略' or e.status not in ('cached','ignored') or retranslation_eligible(e):self.checked.add(e.uid)
         self.refresh()
 
     def clear_visible(self):
@@ -771,7 +782,7 @@ class App:
         entry=self.visible[choice[0]]
         self.remember_draft();self.current=entry;self._loading=True
         self.detail_title.set(entry.category+' · '+FIELD_LABELS.get(entry.field,'任务目标' if entry.field.startswith('goalDescription') else '文本'))
-        note=entry.error or entry.consistency_note
+        note=entry.retranslation_error or entry.error or entry.consistency_note
         self.detail_var.set(pathlib.PurePosixPath(entry.file).name+(('\n'+note[:180]+('…' if len(note)>180 else '')) if note else ''))
         self.set_text(self.original,self.source_text(),'disabled')
         draft=self.drafts.get(entry)
@@ -813,11 +824,14 @@ class App:
             self._loading=False;self.flush_drafts();self.refresh();self.write_log('译文已保存，生成语言包后生效')
         except BridgeError as exc:self.show_error(exc)
 
-    def start_translate(self):
+    def start_retranslate(self):
+        self.start_translate(replacing=True)
+
+    def start_translate(self,replacing=False):
         if self.busy or not self.scan:return
         if not self.match_scan_paths():return
-        rows=self.selected_entries()
-        if not rows:self.write_log('请先勾选待翻译的条目');return
+        rows=self.selected_retranslations() if replacing else self.selected_entries()
+        if not rows:self.write_log('请先勾选已有 AI 或手动译文' if replacing else '请先勾选待翻译的条目');return
         try:
             config,key=self.collect_settings();client=Client(config,key,self.stop,progress=self.emit)
             settings.save(self.directory,config,key)
@@ -826,11 +840,12 @@ class App:
         def work():
             from .core import assert_fresh
             assert_fresh(self.scan)
-            return translate(rows,self.scan,self.cache,client,config,self.stop,self.emit)
+            fn=retranslate if replacing else translate
+            return fn(rows,self.scan,self.cache,client,config,self.stop,self.emit)
         def done(stats):
-            self.checked.difference_update(e.uid for e in self.scan.entries if e.status=='cached')
-            self.refresh();self.write_log(f'翻译完成 · 已保存 {stats["success"]} 条 · 失败 {stats["failed"]} 条')
-        self.run(work,done,'翻译',rows)
+            self.checked.difference_update(e.uid for e in rows if e.status=='cached' and not e.retranslation_error)
+            self.refresh();self.write_log(f'{"重译" if replacing else "翻译"}完成 · 已保存 {stats["success"]} 条 · 失败 {stats["failed"]} 条'+('（保留旧译文）' if replacing and stats['failed'] else ''))
+        self.run(work,done,'重译' if replacing else '翻译',None if replacing else rows)
 
     def start_build(self):
         if self.busy or not self.scan:return

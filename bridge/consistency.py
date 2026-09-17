@@ -135,7 +135,9 @@ def _choose(slots,custom,issues,kind):
         chosen=min(slots,key=_rank);value=custom[source];model='manual-glossary'
     elif candidates:
         manual=[s for s in candidates if s['entry'].translation_model in ('manual','manual-glossary')]
+        revised=[s for s in candidates if s['entry'].translation_model.startswith('retranslate:')]
         if manual:chosen=min(manual,key=lambda s:(-s['entry'].translation_created,_rank(s)))
+        elif revised:chosen=min(revised,key=lambda s:(-s['entry'].translation_created,_rank(s)))
         else:
             priority=min(_rank(s)[0] for s in candidates)
             best=[s for s in candidates if _rank(s)[0]==priority]
@@ -153,6 +155,7 @@ def _apply(scan,slots,term,kind):
     for s in slots:
         e=s['entry']
         if e is None or e.uid in scan.consistency_blocked or e.status=='ignored' or not (e.status=='cached' or e.candidate):continue
+        if e.uid in scan.force_translation_ids and e.status!='cached':continue
         if e.translation==term['translation'] and e.status=='cached':continue
         change={'kind':kind,'uid':e.uid,'file':e.file,'path':list(e.path),'field':e.field,
                 'source':e.source,'previous':e.translation,'translation':term['translation'],

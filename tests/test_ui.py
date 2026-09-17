@@ -171,6 +171,34 @@ class GuiTests(Fixture):
         self.app.choose_mode('已忽略');self.app.select_visible();self.app.unignore_checked()
         self.assertEqual(row.status,'cached');self.assertEqual(row.translation,'获得3层[Binding]。')
 
+    def test_cached_rows_can_be_selected_for_explicit_retranslation(self):
+        row=self.pick(lambda row:row.field=='desc')
+        self.app.cache.put(row,'获得3层[Binding]。','old-model')
+        self.app.checked.clear();self.app.choose_mode('已有译文')
+        self.app.select_visible()
+        self.assertEqual(self.app.selected_retranslations(),[row])
+        self.assertEqual(self.app.selected_entries(),[])
+        self.assertTrue(self.app.retranslate_button.instate(['!disabled']))
+        self.assertTrue(self.app.translate_button.instate(['disabled']))
+        self.assertIn('重译 1 条',self.app.selected_var.get())
+        with patch.object(self.app,'collect_settings',return_value=({'api_base':'http://localhost/v1','model':'fake'},'')):
+            with patch.object(self.app,'run') as run:
+                self.app.start_retranslate()
+        self.assertEqual(run.call_args.args[2],'重译')
+        self.assertIsNone(run.call_args.args[3])
+
+    def test_retranslation_failures_visible_without_losing_cached_text(self):
+        row=self.pick(lambda row:row.field=='desc')
+        self.app.cache.put(row,'获得3层[Binding]。','old-model')
+        row.retranslation_error='重译失败；旧译文已保留'
+        self.app.choose_mode('失败项');self.app.clear_visible();self.app.select_filtered()
+        self.assertEqual(self.app.selected_retranslations(),[row])
+        self.pick(lambda e:e.uid==row.uid)
+        self.assertEqual(self.app.translation.get('1.0','end-1c'),'获得3层[Binding]。')
+        self.assertIn('旧译文已保留',self.app.detail_var.get())
+        self.app.busy=True;self.app.update_actions()
+        self.assertTrue(self.app.retranslate_button.instate(['disabled']))
+
     def test_busy_state_locks_editor_and_api_fields(self):
         self.pick();self.edit('草稿')
         self.app.busy=True;self.app.update_actions()

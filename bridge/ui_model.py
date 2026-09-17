@@ -14,7 +14,7 @@ def matches(entry,mode,categories,query=''):
     if mode=='缺漏补查' and not (entry.coverage_gap and entry.status not in ('cached','ignored')):return False
     if mode=='本次更新' and not (entry.recommended and entry.status not in ('cached','ignored')):return False
     if mode=='已有译文' and entry.status!='cached':return False
-    if mode=='失败项' and entry.status!='failed':return False
+    if mode=='失败项' and entry.status!='failed' and not entry.retranslation_error:return False
     if mode=='译名待核对' and not entry.consistency_note:return False
     if mode=='已忽略' and entry.status!='ignored':return False
     query=query.strip().casefold()

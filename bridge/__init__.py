@@ -1,2 +1,2 @@
 """Local, additive localization bridge for Limbus Company."""
-VERSION = '1.2.0'
+VERSION = '1.2.1'

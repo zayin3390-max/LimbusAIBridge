@@ -281,6 +281,7 @@ class Entry:
     translation_model: str = ''
     translation_created: float = 0.0
     consistency_note: str = ''
+    retranslation_error: str = ''
 
     @property
     def cache_hash(self):
@@ -325,7 +326,7 @@ class Entry:
     def public(self):
         return {'uid': self.uid, 'file': self.file, 'category': self.category, 'path': list(self.path), 'field': self.field,
                 'source': self.source, 'target': self.target, 'reason': self.reason, 'active': self.active,
-                'refs': self.refs, 'translation': self.translation, 'status': self.status, 'error': self.error,'newly_seen':self.newly_seen,'recommended':self.recommended,'candidate':self.candidate,'coverage_gap':self.coverage_gap,'needs_translation':self.needs_translation,'consistency_note':self.consistency_note}
+                'refs': self.refs, 'translation': self.translation, 'status': self.status, 'error': self.error,'newly_seen':self.newly_seen,'recommended':self.recommended,'candidate':self.candidate,'coverage_gap':self.coverage_gap,'needs_translation':self.needs_translation,'consistency_note':self.consistency_note,'retranslation_error':self.retranslation_error}
 
 @dataclass
 class Scan:
@@ -355,6 +356,7 @@ class Scan:
     consistency_glossary_path: Any = None
     consistency_blocked: set = field(default_factory=set)
     language_knowledge: Any = field(default=None,repr=False)
+    force_translation_ids: set = field(default_factory=set,repr=False)
 
     def summary(self):
         return {'source_files': len(self.sources), 'baseline_files': len(self.bases), 'version': self.version,
@@ -379,6 +381,7 @@ class Cache:
         ensure_plain_path(self.path)
         with self.connect() as con:
             con.execute('CREATE TABLE IF NOT EXISTS translations (uid TEXT, source_hash TEXT, source TEXT, translated TEXT, model TEXT, created REAL, PRIMARY KEY(uid,source_hash))')
+            con.execute('CREATE TABLE IF NOT EXISTS retranslation_failures (uid TEXT, source_hash TEXT, reason TEXT, created REAL, PRIMARY KEY(uid,source_hash))')
             con.execute('CREATE TABLE IF NOT EXISTS ignored (uid TEXT, source_hash TEXT, PRIMARY KEY(uid,source_hash))')
             con.execute('CREATE TABLE IF NOT EXISTS observed (scope TEXT, uid TEXT, text_hash TEXT, is_new INTEGER, PRIMARY KEY(scope,uid))')
             con.execute('CREATE TABLE IF NOT EXISTS scan_features (scope TEXT, name TEXT, PRIMARY KEY(scope,name))')
@@ -394,11 +397,13 @@ class Cache:
         with self.connect() as con:
             rows = {(a,b):(c,m,t) for a,b,c,m,t in con.execute('SELECT uid,source_hash,translated,model,created FROM translations')}
             ignored = set(con.execute('SELECT uid,source_hash FROM ignored'))
+            retry_errors={(a,b):c for a,b,c in con.execute('SELECT uid,source_hash,reason FROM retranslation_failures')}
         for entry in entries:
             ident=(entry.uid,entry.cache_hash)
             legacy=legacy_rpg_id(entry.file,entry.tokens,entry.path)
             old_ident=(legacy,entry.cache_hash)
             cache_ident=ident if ident in rows else old_ident
+            entry.retranslation_error=retry_errors.get(ident,retry_errors.get(old_ident,''))
             if ident in ignored or old_ident in ignored:
                 entry.status = 'ignored'
             elif cache_ident in rows:
@@ -413,6 +418,7 @@ class Cache:
         created=time.time()
         with self.connect() as con:
             con.execute('INSERT OR REPLACE INTO translations VALUES (?,?,?,?,?,?)', (entry.uid,entry.cache_hash,entry.source,translation,model,created))
+            con.execute('DELETE FROM retranslation_failures WHERE uid=? AND source_hash=?',(entry.uid,entry.cache_hash))
             con.execute('DELETE FROM ignored WHERE uid=? AND source_hash=?',(entry.uid,entry.cache_hash))
             legacy=legacy_rpg_id(entry.file,entry.tokens,entry.path)
             if legacy:con.execute('DELETE FROM ignored WHERE uid=? AND source_hash=?',(legacy,entry.cache_hash))
@@ -420,6 +426,13 @@ class Cache:
         entry.translation_model=model;entry.translation_created=created
         entry.status = 'cached'
         entry.error = ''
+        entry.retranslation_error = ''
+    def record_retranslation_failure(self,entry,reason):
+        with self.connect() as con:
+            con.execute('INSERT OR REPLACE INTO retranslation_failures VALUES (?,?,?,?)',
+                        (entry.uid,entry.cache_hash,reason,time.time()))
+        entry.retranslation_error=reason
+
     def ignore(self, entry, value=True):
         with self.connect() as con:
             if value:
