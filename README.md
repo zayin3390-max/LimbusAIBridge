@@ -1,6 +1,6 @@
 # 边狱补译 · Limbus AI Bridge
 
-个人用《Limbus Company》临时补译工具，版本 **1.1.0**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
+个人用《Limbus Company》临时补译工具，版本 **1.1.1**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
 
 [下载 Windows 版](https://github.com/zayin3390-max/LimbusAIBridge/releases/latest)
 
@@ -11,7 +11,8 @@
 - 常用 API 设置与高级选项分开，运行记录按需展开。
 
 - 对照本机游戏原文与零协会语言包，识别缺少译文的字段；首次扫描建立基线，后续新增或变更内容才默认列入“本次更新”。
-- 覆盖人格、主动/被动技能、背景剧情、E.G.O、敌人、主线及卡池等文本。
+- 覆盖人格、主动/被动技能、背景剧情、E.G.O、敌人、主线及卡池等文本。包含 RPGSystem 探索对话、选项、说话人、NPC、任务目标、道具属性和界面提示。
+- 默认“待补译”合并新内容与探索资源缺漏；“缺漏补查”单独显示探索文本，避免被“本次更新为 0”掩盖。
 - 网络失败和校验失败自动重试，每条最多重试 10 次；支持 1–4 批并行及成功结果缓存。
 - 跨界面译名一致性：统一状态与弹窗、技能等级、正文引用及剧情名称。先确定被正文引用的新名称，再继续并行翻译。
 - 保留 Hana、Zwei 等协会数字专名；校验数字、引擎标记、变量、富文本和换行。
@@ -48,13 +49,13 @@
 
     python -m venv .venv
     .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.1.0 --distpath release --workpath build-v110 main.py
+    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.1.1 --distpath release --workpath build-v111 main.py
 
 可执行程序独立启动自检：
 
-    .\release\LimbusAIBridge-1.1.0.exe --self-test --data-dir .\research\self-test
+    .\release\LimbusAIBridge-1.1.1.exe --self-test --data-dir .\research\self-test
 
-1.1.0 已通过 174 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互与草稿恢复。测试使用临时夹具，不调用真实翻译 API。
+1.1.1 已通过 195 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互、草稿恢复与探索资源支持。测试使用临时夹具，不调用真实翻译 API。
 
 ## 数据与隐私
 

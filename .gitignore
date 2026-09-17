@@ -36,6 +36,7 @@
 /*.spec
 !/LimbusAIBridge-1.0.7.spec
 !/LimbusAIBridge-1.1.0.spec
+!/LimbusAIBridge-1.1.1.spec
 /加速说明.md
 /误报检查说明.md
 /校验失败分析.md

@@ -215,6 +215,19 @@ class GuiTests(Fixture):
         self.assertFalse(self.app.busy)
         self.assertEqual(before,{str(p):p.read_bytes() for p in self.game.rglob('*') if p.is_file()})
 
+    def test_existing_exploration_gap_appears_without_new_update(self):
+        row=entry('rpg-gap',file='RPGSystem/rpg-loc-dialogue-floor-1.json',newly_seen=False,field='text')
+        self.app.scan.entries=[row]
+        self.app.scanned(self.app.scan)
+        self.assertEqual(self.app.mode.get(),'待补译')
+        self.assertEqual(len(self.app.visible),1)
+        self.assertEqual(self.app.selected_entries(),[row])
+        self.assertTrue(self.app.translate_button.instate(['!disabled']))
+        self.app.choose_mode('本次更新')
+        self.assertEqual(len(self.app.visible),0)
+        self.app.choose_mode('缺漏补查')
+        self.assertEqual(len(self.app.visible),1)
+
     def test_advanced_and_log_sections_toggle(self):
         self.app.toggle_advanced();self.assertTrue(self.app.advanced_open)
         self.app.toggle_advanced();self.assertFalse(self.app.advanced_open)

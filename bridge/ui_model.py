@@ -3,13 +3,15 @@ import json
 import pathlib
 from .core import atomic_write, dumps, TOKENS, BridgeError
 
-MODES=('本次更新','已有译文','失败项','译名待核对','所有条目','已忽略')
+MODES=('待补译','缺漏补查','本次更新','已有译文','失败项','译名待核对','所有条目','已忽略')
 FIELD_LABELS={'name':'名称','abName':'简称','title':'标题','desc':'说明','content':'正文',
               'flavor':'背景','dlg':'台词','teller':'说话人','summary':'摘要',
-              'nameWithTitle':'称谓','place':'地点','chaptertitle':'章节'}
+              'nameWithTitle':'称谓','place':'地点','chaptertitle':'章节','text':'正文','speaker':'说话人','displayName':'显示名称','statText':'属性说明'}
 
 def matches(entry,mode,categories,query=''):
     if entry.category not in categories:return False
+    if mode=='待补译' and not entry.needs_translation:return False
+    if mode=='缺漏补查' and not (entry.coverage_gap and entry.status not in ('cached','ignored')):return False
     if mode=='本次更新' and not (entry.recommended and entry.status not in ('cached','ignored')):return False
     if mode=='已有译文' and entry.status!='cached':return False
     if mode=='失败项' and entry.status!='failed':return False

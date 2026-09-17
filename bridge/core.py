@@ -20,14 +20,15 @@ from dataclasses import dataclass, field
 from typing import Any
 from .proper_names import NAME_PATTERN, strip_names, names_preserved
 from .scan_rules import resource_groups, resource_group, canonical_resources, engine_note
+from .resource_schema import rpg_kind, rpg_text_field, rpg_hidden_row
 
 PACK_NAME = 'LimbusAI_zh-CN'
 OWNER = 'limbus-ai-bridge-v1'
-PACK_RULES_VERSION = 2
+PACK_RULES_VERSION = 3
 MARKER = '.limbus-ai-bridge.json'
 TEXT_FIELDS = set('teller dialog title prevDesc eventDesc behaveDesc successDesc failureDesc content name clue story desc subDesc message messageDesc result dlg summary undefined flavor mainText subText text rawDesc description abnormalityName simpleDesc sentence add min specialName panicName lowMoraleDescription panicDescription nameWithTitle skinItemTitle skinItemDesc teacher longName shortName nickName abName company area chapter chaptertitle timeline place parttitle openCondition relatedChapterText askLevelUp openConditionNumber'.split())
-TECH_FIELDS = set('id usage codeName iconId iconID variation variation2 colorCode outlineColorCode mainTextColor mainTextGlowColor debugNodeId debugNodeID songWriter keywords chapterNumber imgStr model'.split())
-IDENTITY_KEYS = ('id', 'ID', 'level', 'coinIndex', 'index')
+TECH_FIELDS = set('id key usage codeName iconId iconID variation variation2 colorCode outlineColorCode mainTextColor mainTextGlowColor debugNodeId debugNodeID songWriter keywords chapterNumber imgStr model'.split())
+IDENTITY_KEYS = ('id', 'ID', 'level', 'coinIndex', 'index', 'key')
 HANGUL = re.compile('[\uac00-\ud7af]')
 HAN = re.compile('[\u3400-\u9fff]')
 LEXICAL = re.compile('[A-Za-z\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]')
@@ -120,6 +121,17 @@ def language_files(root, lang):
             raise BridgeError(f'移除语言前缀后文件名冲突：{rel}')
         result[rel.casefold()] = (rel, p)
     return result
+
+def text_field(rel,name):
+    return name in TEXT_FIELDS or rpg_text_field(rel,name)
+
+
+def legacy_rpg_id(rel,tokens,path):
+    if (rpg_kind(rel) and len(tokens)>1 and tokens[0]==('key','dataList')
+            and tokens[1][:2]==('row','key') and len(path)>1):
+        return stable_id(rel,(tokens[0],('index',path[1]),*tokens[2:]))
+    return None
+
 
 def list_key(items):
     if not items or not all(isinstance(v, dict) for v in items):
@@ -285,8 +297,17 @@ class Entry:
         return self.candidate and self.newly_seen
 
     @property
+    def coverage_gap(self):
+        return self.candidate and bool(rpg_kind(self.file))
+
+    @property
+    def needs_translation(self):
+        return (self.recommended or self.coverage_gap) and self.status not in ('cached','ignored')
+
+    @property
     def category(self):
         name = pathlib.PurePosixPath(self.file).name.casefold()
+        if rpg_kind(self.file): return '主线剧情'
         if 'gacha' in name: return '卡池'
         if name.startswith(('bufs','buffabilities','battlekeywords','keyword','skilltag','unitkeyword')): return '关联术语'
         if self.file.startswith('EGOVoiceDig/') or name.startswith(('ego.json','egos','ego-','egos-','ego_')) and not name.startswith(('egogift','ego_gift')) or ('ego' in name and ('skill' in name or 'passive' in name)):
@@ -304,7 +325,7 @@ class Entry:
     def public(self):
         return {'uid': self.uid, 'file': self.file, 'category': self.category, 'path': list(self.path), 'field': self.field,
                 'source': self.source, 'target': self.target, 'reason': self.reason, 'active': self.active,
-                'refs': self.refs, 'translation': self.translation, 'status': self.status, 'error': self.error,'newly_seen':self.newly_seen,'recommended':self.recommended,'candidate':self.candidate,'consistency_note':self.consistency_note}
+                'refs': self.refs, 'translation': self.translation, 'status': self.status, 'error': self.error,'newly_seen':self.newly_seen,'recommended':self.recommended,'candidate':self.candidate,'coverage_gap':self.coverage_gap,'needs_translation':self.needs_translation,'consistency_note':self.consistency_note}
 
 @dataclass
 class Scan:
@@ -337,6 +358,8 @@ class Scan:
     def summary(self):
         return {'source_files': len(self.sources), 'baseline_files': len(self.bases), 'version': self.version,
                 'recommended': sum(e.recommended and e.status not in ('cached', 'ignored') for e in self.entries),
+                'coverage_missing':sum(e.coverage_gap and e.status not in ('cached','ignored') for e in self.entries),
+                'pending':sum(e.needs_translation for e in self.entries),
                 'cached': sum(e.status == 'cached' for e in self.entries), 'preserved': self.preserved,
                 'review': sum(not e.recommended for e in self.entries),
                 'historical': sum(e.candidate and not e.newly_seen for e in self.entries),
@@ -357,6 +380,7 @@ class Cache:
             con.execute('CREATE TABLE IF NOT EXISTS translations (uid TEXT, source_hash TEXT, source TEXT, translated TEXT, model TEXT, created REAL, PRIMARY KEY(uid,source_hash))')
             con.execute('CREATE TABLE IF NOT EXISTS ignored (uid TEXT, source_hash TEXT, PRIMARY KEY(uid,source_hash))')
             con.execute('CREATE TABLE IF NOT EXISTS observed (scope TEXT, uid TEXT, text_hash TEXT, is_new INTEGER, PRIMARY KEY(scope,uid))')
+            con.execute('CREATE TABLE IF NOT EXISTS scan_features (scope TEXT, name TEXT, PRIMARY KEY(scope,name))')
     @contextmanager
     def connect(self):
         connection=sqlite3.connect(self.path,timeout=30)
@@ -370,10 +394,14 @@ class Cache:
             rows = {(a,b):(c,m,t) for a,b,c,m,t in con.execute('SELECT uid,source_hash,translated,model,created FROM translations')}
             ignored = set(con.execute('SELECT uid,source_hash FROM ignored'))
         for entry in entries:
-            if (entry.uid,entry.cache_hash) in ignored:
+            ident=(entry.uid,entry.cache_hash)
+            legacy=legacy_rpg_id(entry.file,entry.tokens,entry.path)
+            old_ident=(legacy,entry.cache_hash)
+            cache_ident=ident if ident in rows else old_ident
+            if ident in ignored or old_ident in ignored:
                 entry.status = 'ignored'
-            elif (entry.uid,entry.cache_hash) in rows:
-                value,model,created = rows[entry.uid,entry.cache_hash]
+            elif cache_ident in rows:
+                value,model,created = rows[cache_ident]
                 try: validate_translation(entry.source, value)
                 except BridgeError: continue
                 entry.translation = value
@@ -385,6 +413,8 @@ class Cache:
         with self.connect() as con:
             con.execute('INSERT OR REPLACE INTO translations VALUES (?,?,?,?,?,?)', (entry.uid,entry.cache_hash,entry.source,translation,model,created))
             con.execute('DELETE FROM ignored WHERE uid=? AND source_hash=?',(entry.uid,entry.cache_hash))
+            legacy=legacy_rpg_id(entry.file,entry.tokens,entry.path)
+            if legacy:con.execute('DELETE FROM ignored WHERE uid=? AND source_hash=?',(legacy,entry.cache_hash))
         entry.translation = translation
         entry.translation_model=model;entry.translation_created=created
         entry.status = 'cached'
@@ -395,22 +425,31 @@ class Cache:
                 con.execute('INSERT OR IGNORE INTO ignored VALUES (?,?)',(entry.uid,entry.cache_hash))
             else:
                 con.execute('DELETE FROM ignored WHERE uid=? AND source_hash=?',(entry.uid,entry.cache_hash))
+                legacy=legacy_rpg_id(entry.file,entry.tokens,entry.path)
+                if legacy:con.execute('DELETE FROM ignored WHERE uid=? AND source_hash=?',(legacy,entry.cache_hash))
         entry.status = 'ignored' if value else 'pending'
 
     def observe(self, scan):
         scope=digest(str(scan.game).casefold()+'|'+scan.source_lang)
         with self.connect() as con:
             prior={a:(b,c) for a,b,c in con.execute('SELECT uid,text_hash,is_new FROM observed WHERE scope=?',(scope,))}
+            rpg_seen=con.execute('SELECT 1 FROM scan_features WHERE scope=? AND name=?',(scope,'rpg-key-v1')).fetchone() is not None
             rows=[]; new_flags={}
             for key,source in scan.sources.items():
                 rel=scan.source_paths[key][0]
-                for tokens,_,name,text in flatten(source):
-                    if name not in TEXT_FIELDS or not isinstance(text,str): continue
+                for tokens,path,name,text in flatten(source):
+                    if not text_field(rel,name) or not isinstance(text,str): continue
                     uid=digest(stable_id(rel,tokens)); hash_value=digest(text)
                     previous=prior.get(uid)
+                    if previous is None and not rpg_seen:
+                        legacy=legacy_rpg_id(rel,tokens,path)
+                        if legacy:previous=prior.get(digest(legacy))
                     is_new=bool(prior) and (previous is None or previous[0]!=hash_value or previous[1])
+                    # First support for this schema is a coverage repair, not evidence of a game update.
+                    if rpg_kind(rel) and not rpg_seen and previous is None:is_new=False
                     rows.append((scope,uid,hash_value,int(is_new))); new_flags[uid]=is_new
             con.executemany('INSERT OR REPLACE INTO observed VALUES (?,?,?,?)',rows)
+            con.execute('INSERT OR IGNORE INTO scan_features VALUES (?,?)',(scope,'rpg-key-v1'))
         for e in scan.entries: e.newly_seen=new_flags.get(digest(e.uid),False)
 
 def signature(game, baseline, lang='en'):
@@ -468,19 +507,19 @@ def scan_game(game, baseline=None, lang='en', cache=None, stop=None, progress=la
         unsafe=list(unsafe_rows(source))+list(unsafe_rows(base)) if base is not None else list(unsafe_rows(source))
         if unsafe:
             warnings.append(f'{rel}：有 {len(unsafe)} 处重复/缺失标识的记录，仅这些记录保留原状，不做 AI 修改')
-        active_file = bool(bp) or not groups or key in groups or rel.startswith('StoryData/')
+        active_file = bool(bp) or not groups or key in groups or rel.startswith('StoryData/') or bool(rpg_kind(rel))
         # Orphaned duplicate root files are not presumed to be in use.
         file_entries = []
         for tokens,path,name,text in fields:
             if not isinstance(text,str): continue
-            if name not in TEXT_FIELDS:
+            if not text_field(rel,name):
                 if name.strip() not in TECH_FIELDS and translatable(text): unknown[name] += 1
                 continue
             reason = classify(text, bf.get(tokens), tokens in bf)
             if reason is None:
                 if tokens in bf and bf[tokens]: preserved += 1
                 continue
-            if engine_note(rel,name,text):
+            if engine_note(rel,name,text) or rpg_hidden_row(rel,source,path):
                 exclusions.append({'file':rel,'path':list(path),'reason':'engine_note'})
                 continue
             if reason == 'schema':
@@ -493,7 +532,11 @@ def scan_game(game, baseline=None, lang='en', cache=None, stop=None, progress=la
             obj = source
             for step in path[:-1]: obj = obj[step]
             if isinstance(obj, dict):
-                context = json.dumps({k:v for k,v in obj.items() if k in ('id','model','teller','title','name','place') and isinstance(v,(str,int))},ensure_ascii=False)
+                context = json.dumps({k:v for k,v in obj.items() if k in ('id','key','model','teller','speaker','title','name','displayName','place') and isinstance(v,(str,int))},ensure_ascii=False)
+            if rpg_kind(rel) and len(path)>1 and path[0]=='dataList':
+                context_data=json.loads(context or '{}')
+                context_data['block_key']=source['dataList'][path[1]].get('key','')
+                context=json.dumps(context_data,ensure_ascii=False)
             file_entries.append(Entry(stable_id(rel,tokens),rel,tokens,path,name,text,bf.get(tokens),reason,active_file,context))
         # Reference languages are used only for candidate fields.
         if file_entries:

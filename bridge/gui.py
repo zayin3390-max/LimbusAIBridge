@@ -23,7 +23,7 @@ HELP='''使用顺序
 1. 先让 Steam 和游戏完成本次更新，再退出游戏。
 2. 用原来的 LLC 工具箱更新零协会汉化（若已有更新）。
 3. 打开本工具，在「API 设置」填写自己的 Chat Completions 兼容地址、API Key、模型名。
-4. 「扫描更新」后选择分类。默认只勾选首次扫描以后新增、且仍缺少译文的人格、E.G.O、主线剧情、敌方和卡池条目。
+4. 「扫描更新」后选择分类。默认勾选新增待译内容，以及 RPGSystem 探索场景中缺少译文的条目。探索对话、任务、NPC、道具和界面文本归入「主线剧情」。
 5. 点击「翻译所选」。这一步才会发送所选游戏文本到你配置的 API，并消耗服务商额度。
 6. 检查译文后点击「生成语言包」。此操作不调用 API。
 7. 在游戏启动页的自定义语言按钮中选择 LimbusAI_zh-CN，按游戏提示重启。基础语言推荐英文。
@@ -35,7 +35,7 @@ HELP='''使用顺序
 
 如何识别新内容
 
-按 ID、技能等级和硬币位置对齐；同一资源组中，总表已经汉化的相同 ID、相同原文不会再次报缺。首次扫描建立当前原文基线，不把存量差异称为新版本漏译。默认「本次更新」只推荐此后新增/变更且缺少译文的字段；无更新时应为 0。首次使用时若更新已经发生，或要核对旧文本，可手动切到「所有条目」查看。
+按 ID、探索资源 key、技能等级和硬币位置对齐；同一资源组中，总表已经汉化的相同 ID、相同原文不会再次报缺。首次扫描建立当前原文基线，不把存量差异称为新版本漏译。「本次更新」只显示基线之后新增/变更且缺少译文的字段。默认「待补译」还包含已支持的探索资源缺漏，可在「缺漏补查」单独查看；即使本次更新为 0，也可能有这类缺漏。首次使用时若更新已经发生，或要核对旧文本，可手动切到「所有条目」查看。
 原文保留、空值、剧情省略字段、旧文件等只表示文件差异，不证明当前游戏画面缺译。하나协会等专名保留；中文夹杂外语也不作为自动重译依据。明确开发备注和有译文覆盖的重复导出文件会排除，依据写入扫描报告。无法安全对齐的重复 ID 保留原状。
 
 协会数字专名
@@ -116,7 +116,7 @@ HELP_PAGES={
 升级工具
 关闭旧窗口，将新版放在原目录，继续使用旁边的 data 文件夹。""",
 '常见问题':"""扫描后没有待翻译内容？
-“本次更新”只显示首次扫描后新增或变更、且仍缺少译文的条目。旧差异在“所有条目”查看，不一定是游戏内漏译。
+“待补译”包含新增内容及已支持的探索场景缺漏。“本次更新”只显示基线之后的变化；“缺漏补查”可单独查看探索文本。其他旧差异在“所有条目”查看。
 
 翻译失败怎么办？
 临时错误和校验失败会自动重试，最多 10 次。达到上限后处理后续条目；修正设置后可在“失败项”中重新勾选。
@@ -268,7 +268,7 @@ class App:
         self.game_entry.pack(side='left',fill='x',expand=True,padx=(0,8));self.editables.append((self.game_entry,'normal'))
         self.button(path_row,'选择',self.choose_game,small=True)
         stats=ttk.Frame(frame);stats.pack(fill='x',pady=(0,14));self.stat_values={}
-        for key,label,mode in [('pending','待翻译','本次更新'),('cached','已有译文','已有译文'),('failed','失败','失败项'),('review','译名待核对','译名待核对')]:
+        for key,label,mode in [('pending','待翻译','待补译'),('cached','已有译文','已有译文'),('failed','失败','失败项'),('review','译名待核对','译名待核对')]:
             card=tk.Frame(stats,bg=PAPER,highlightthickness=1,highlightbackground=LINE)
             card.pack(side='left',fill='x',expand=True,padx=(0,8))
             value=tk.StringVar(value='—');self.stat_values[key]=value
@@ -279,7 +279,7 @@ class App:
             for w in (card,line,number,text):
                 w.configure(cursor='hand2');w.bind('<Button-1>',lambda event,mode=mode:self.choose_mode(mode))
         filters=ttk.Frame(frame);filters.pack(fill='x',pady=(0,10))
-        self.mode=tk.StringVar(value='本次更新')
+        self.mode=tk.StringVar(value='待补译')
         combo=ttk.Combobox(filters,textvariable=self.mode,values=MODES,state='readonly',width=15)
         combo.pack(side='left');combo.bind('<<ComboboxSelected>>',self.filter_changed)
         self.category=tk.StringVar(value='常用分类')
@@ -586,9 +586,10 @@ class App:
 
     def scanned(self,scan):
         self.remember_draft();self.current=None;self.scan=scan;self.last_watch_signature=scan.signature
-        self.checked={e.uid for e in scan.entries if e.recommended and e.category!='其他' and e.status not in ('cached','ignored')}
+        self.checked={e.uid for e in scan.entries if e.needs_translation and e.category!='其他'}
         self.page_index=0;self.refresh()
-        self.write_log(f'扫描完成 · 待翻译 {len(self.checked)} 条')
+        gaps=sum(e.coverage_gap and e.status not in ('cached','ignored') for e in scan.entries)
+        self.write_log(f'扫描完成 · 待翻译 {len(self.checked)} 条'+(f' · 探索缺漏 {gaps} 条' if gaps else ''))
         for message in scan.warnings:self.write_log(message,announce=False)
         changes=len({r['uid'] for r in scan.consistency_changes})
         if changes:self.write_log(f'已对齐 {changes} 个译名字段，生成语言包后生效',announce=False)
@@ -627,8 +628,8 @@ class App:
                 title,hint='先扫描游戏内容','选择游戏目录，然后点击“扫描更新”。'
             elif self.search.get().strip():
                 title,hint='没有匹配的条目','试试其他关键词，或清空搜索。'
-            elif self.mode.get()=='本次更新':
-                title,hint='当前没有新增待译内容','存量差异可以在“所有条目”查看。'
+            elif self.mode.get() in ('本次更新','待补译','缺漏补查'):
+                title,hint='当前筛选下没有待译内容','其他存量差异可在“所有条目”查看。'
             else:
                 title,hint='这里还没有条目','切换分类或筛选条件后再查看。'
             self.empty_title.set(title);self.empty_hint.set(hint)
@@ -636,7 +637,7 @@ class App:
             else:self.empty_action.pack_forget()
             self.empty.place(relx=.5,rely=.5,anchor='center')
         entries=self.scan.entries if self.scan else []
-        for key,number in [('pending',sum(e.recommended and e.status not in ('cached','ignored') for e in entries)),
+        for key,number in [('pending',sum(e.needs_translation for e in entries)),
                            ('cached',sum(e.status=='cached' for e in entries)),
                            ('failed',sum(e.status=='failed' for e in entries)),
                            ('review',sum(bool(e.consistency_note) for e in entries))]:
@@ -752,7 +753,7 @@ class App:
         if not choice or choice[0] not in self.visible:return
         entry=self.visible[choice[0]]
         self.remember_draft();self.current=entry;self._loading=True
-        self.detail_title.set(entry.category+' · '+FIELD_LABELS.get(entry.field,'文本'))
+        self.detail_title.set(entry.category+' · '+FIELD_LABELS.get(entry.field,'任务目标' if entry.field.startswith('goalDescription') else '文本'))
         note=entry.error or entry.consistency_note
         self.detail_var.set(pathlib.PurePosixPath(entry.file).name+(('\n'+note[:180]+('…' if len(note)>180 else '')) if note else ''))
         self.set_text(self.original,self.source_text(),'disabled')

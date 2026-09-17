@@ -6,6 +6,7 @@ import re
 from .core import (BridgeError,TOKENS,HAN,flatten,stable_id,validate_translation,
                    classify,language_files,read_json)
 from .proper_names import names as protected_names
+from .resource_schema import rpg_kind
 from .status_terms import align_status_terms,status_slot,rank_file
 
 PRIMARY={'character','personality','enemy','ego','skill','passive','announcer',
@@ -15,12 +16,13 @@ FALLBACK=(('battlekeywords','keyword'),('bufs','buf'),('skills','skill'),('passi
           ('egos','ego'),('announcer','announcer'),('scenariomodelcodes','model'),
           ('unitkeyword','unitkeyword'),('panicinfo','panic'),('stagechapter','chapter'),
           ('stagenode','stage'),('storytheatermain','theater'),('gachatitle','gacha'))
-NAME_FIELDS={'name','abName','nickName','nameWithTitle','teller','title','place','chaptertitle','panicName'}
+NAME_FIELDS={'name','abName','nickName','nameWithTitle','teller','title','place','chaptertitle','panicName','speaker','displayName'}
 QUOTE=re.compile(r'["“「『]([^"”」』\r\n]+)["”」』]')
 WORDS=re.compile(r'[A-Za-zÀ-ÖØ-öø-ÿ0-9_]+')
 
 
 def family(scan,rel):
+    if rpg_kind(rel):return 'rpg-'+rpg_kind(rel)+':'+rel.casefold()
     if rel.lower().startswith('storydata/'):return 'story:'+rel.casefold()
     name=pathlib.PurePosixPath(rel).name.casefold()
     for prefix,kind in FALLBACK:
@@ -30,7 +32,8 @@ def family(scan,rel):
 
 
 def role(kind,field):
-    if field=='teller':return 'actor'
+    if field in ('teller','speaker'):return 'actor'
+    if kind.startswith('rpg-npc:') and field=='displayName':return 'actor'
     if kind in ('character','model') and field in ('name','abName'):return 'actor'
     if kind=='enemy' and field in ('name','abName'):return 'enemy'
     if kind=='personality' and field in ('name','nameWithTitle'):return 'actor'
@@ -85,7 +88,7 @@ def _make_index(scan):
         rel=scan.source_paths[key][0];kind=family(scan,rel)
         base={t:v for t,_,_,v in flatten(scan.bases[key])} if key in scan.bases else {}
         for tokens,path,field,text in flatten(source):
-            if not isinstance(text,str) or not text.strip() or len(tokens)<3 or tokens[0]!=('key','dataList') or tokens[1][:2]!=('row','id'):continue
+            if not isinstance(text,str) or not text.strip() or len(tokens)<3 or tokens[0]!=('key','dataList') or (tokens[1][:2]!=('row','id') and not (rpg_kind(rel) and tokens[1][:2]==('row','key'))):continue
             uid=stable_id(rel,tokens);e=entries.get(uid);label=role(kind,field)
             if field not in NAME_FIELDS and e is None and kind not in PRIMARY:continue
             target=base.get(tokens)
@@ -185,7 +188,7 @@ def _relevant(text,index):
 def _reference_allowed(entry,source,term):
     if source==entry.source and entry.field in NAME_FIELDS:return True
     quoted=any(m.group(1).strip()==source for m in QUOTE.finditer(_plain(entry.source)))
-    narrative=(entry.file.lower().startswith(('storydata/','personalityvoicedlg/','battleannouncerdlg/'))
+    narrative=(entry.file.lower().startswith(('storydata/','rpgsystem/','personalityvoicedlg/','battleannouncerdlg/'))
                or entry.field=='flavor')
     # A skill called "No." is not evidence that ordinary quoted dialogue
     # invokes it. Short enemy/part labels likewise cannot define prose nouns.
