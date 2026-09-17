@@ -45,7 +45,7 @@ def main():
     app=App(root,args.data_dir,autostart=not args.self_test)
     if args.self_test:
         root.update_idletasks()
-        atomic_write(args.data_dir/'self-test.json',dumps({'ok':True,'title':root.title(),'tabs':3,'default_view':app.mode.get(),'max_retries':app.api_vars['retries'].get(),'concurrency':app.api_vars['concurrency'].get(),'tk':root.tk.call('info','patchlevel')}))
+        atomic_write(args.data_dir/'self-test.json',dumps({'ok':True,'title':root.title(),'tabs':len(app.pages),'default_view':app.mode.get(),'max_retries':app.api_vars['retries'].get(),'concurrency':app.api_vars['concurrency'].get(),'tk':root.tk.call('info','patchlevel')}))
         root.destroy(); return 0
     root.mainloop()
     if mutex:

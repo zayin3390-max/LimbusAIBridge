@@ -1,10 +1,16 @@
 # 边狱补译 · Limbus AI Bridge
 
-个人用《Limbus Company》临时补译工具，版本 **1.0.7**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
+个人用《Limbus Company》临时补译工具，版本 **1.1.0**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
+
+[下载 Windows 版](https://github.com/zayin3390-max/LimbusAIBridge/releases/latest)
 
 ## 功能
 
-- 对照本机游戏原文与零协会语言包，识别缺少译文的字段；首次扫描建立基线，后续新增或变更内容才默认列入“更新待补译”。
+- 原文/译文双栏工作台；分页、分类和关键词搜索，失败项与译名待核对单独筛选。
+- 勾选跨页和筛选保留；编辑草稿自动保存，关闭后可继续修改。
+- 常用 API 设置与高级选项分开，运行记录按需展开。
+
+- 对照本机游戏原文与零协会语言包，识别缺少译文的字段；首次扫描建立基线，后续新增或变更内容才默认列入“本次更新”。
 - 覆盖人格、主动/被动技能、背景剧情、E.G.O、敌人、主线及卡池等文本。
 - 网络失败和校验失败自动重试，每条最多重试 10 次；支持 1–4 批并行及成功结果缓存。
 - 跨界面译名一致性：统一状态与弹窗、技能等级、正文引用及剧情名称。先确定被正文引用的新名称，再继续并行翻译。
@@ -12,15 +18,15 @@
 - 创建独立的 LimbusAI_zh-CN 语言包；原游戏文本、LLC 工具箱、零协会原文件和游戏语言配置只读。
 - 更新本工具自己的语言包前备份；检测到额外或人工修改的文件时停止覆盖。
 
-一致性检查与格式校验不能代替语义审校。普通对白差异、同词异义和无法证明的对应关系不会强行合并；可识别的疑似冲突进入“译名需核对”。
+一致性检查与格式校验不能代替语义审校。普通对白差异、同词异义和无法证明的对应关系不会强行合并；可识别的疑似冲突进入“译名待核对”。
 
 ## 使用
 
 1. 完成游戏更新，并通过原 LLC 工具箱安装或更新零协会汉化。
 2. 退出游戏，打开边狱补译。
 3. 在“API 设置”填写地址、API Key 和模型；支持标准 /chat/completions 兼容接口。
-4. 扫描并勾选需要的内容，点击“翻译勾选项”。只有这一步会请求所配置的 API。
-5. 审阅后生成独立语言包，在游戏自定义语言中选择 **LimbusAI_zh-CN**，按游戏提示重启。
+4. 扫描并勾选需要的内容，点击“翻译所选”。翻译和连接测试会请求所配置的 API。
+5. 审阅后生成语言包，在游戏自定义语言中选择 **LimbusAI_zh-CN**，按游戏提示重启。
 
 升级时先关闭旧工具窗口。新旧 EXE 放在同一目录可继续使用旁边 data 目录中的设置与缓存。
 
@@ -42,13 +48,13 @@
 
     python -m venv .venv
     .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.0.7 --distpath release --workpath build-v107 main.py
+    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.1.0 --distpath release --workpath build-v110 main.py
 
 可执行程序独立启动自检：
 
-    .\release\LimbusAIBridge-1.0.7.exe --self-test --data-dir .\research\self-test
+    .\release\LimbusAIBridge-1.1.0.exe --self-test --data-dir .\research\self-test
 
-1.0.7 已通过 149 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护和术语一致性。测试使用临时夹具，不调用真实翻译 API。
+1.1.0 已通过 174 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互与草稿恢复。测试使用临时夹具，不调用真实翻译 API。
 
 ## 数据与隐私
 
