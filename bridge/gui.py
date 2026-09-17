@@ -55,9 +55,10 @@ Hana、Zwei、Tres、Shi、Cinq、Liu、Devyat'、Dieci、Öufi 等按原文拼�
 词汇表与角色语气
 
 内置 80 个核心术语及 15 位主要角色的语气规则。战斗 Coin 使用“硬币”，Golden Bough 使用“金枝”；饰品、章节货币和普通词义分开处理。孤立饰品名不会直接成为其他文件中普通词语的译法。当前说话人由对白字段或专属语音文件判断，不靠一句话提到了谁来猜测。
+角色译例从本地人工汉化按字段配对读取；优先同人格、同场景，再参考相近句式，每条最多附 3 组原译。称呼、语气词和常见句式均附使用条件与出处，缺少对应语料时不凭印象设定口癖。
 良秀的缩写会从本地零协会汉化中读取对应范例，并附上当前前后台词。只有同一完整原句的已知缩写直接锁定；新场景中的缩写需结合韩日参考，进入“译名待核对”。单独一个尚无释义的缩写先留待人工确认，不反复消耗 API 请求。角色语气服从当段情绪、人格及剧情阶段，不强加口癖。
 扫描和生成包时会修正现有 AI 缓存中能明确识别的术语错译；原始缓存、手动审校和零协会原包保留。其它可疑译法仅提示核对，不能保证全部语义正确。
-在“帮助”点击“导出词汇表”，或使用“导出报告”，可获得词表 Markdown、CSV 和本地良秀缩写候选。无扫描时只导出内置规则；扫描后附上本地缩写资料。数据目录中的 glossary.json 可指定个人译法，重扫后应用。完整词表见同包“边狱巴士词汇表.md”。
+在“帮助”点击“导出词表与语料”，或使用“导出报告”，可获得词表 Markdown、CSV、角色语料 Markdown／JSON 和本地良秀缩写候选。无扫描时只导出内置规则；扫描后附上本地对白及出处。数据目录中的 glossary.json 可指定个人译法，重扫后应用。完整词表见同包“边狱巴士词汇表.md”。
 
 自动重试
 
@@ -83,7 +84,7 @@ API 设置新增「并行批次」：默认 2，可设 1–4。2 表示同时处
 API 与隐私
 
 支持标准 /chat/completions 接口（包含 OpenAI 兼容的中转、DeepSeek、部分本地服务）。不直接支持 /responses、Anthropic /messages 或 Gemini 原生接口；这些服务需使用兼容网关。模型名可以手填或获取列表。JSON 模式默认关闭，减少服务商兼容性问题。
-密钥默认只保留在当前进程；勾选「加密记住」后用当前 Windows 用户的 DPAPI 加密保存。不会在日志、报告或请求错误里写出密钥。仅选定条目的原文、附近角色信息、参考语种及相关零协会术语发给你填写的服务商。不会读取其它软件的 API Key。
+密钥默认只保留在当前进程；勾选「加密记住」后用当前 Windows 用户的 DPAPI 加密保存。不会在日志、报告或请求错误里写出密钥。选定条目的原文、附近对白、参考语种、相关零协会术语及检索出的少量人工对白译例会发给你填写的服务商。不会读取其它软件的 API Key。
 可在 data/glossary.json 填写 {"原文术语":"中文译名"} 来补充个人术语。
 
 资料来源
@@ -450,7 +451,7 @@ class App:
             box=self.text_box(page,20);box.insert('1.0',content);box.configure(state='disabled')
         row=ttk.Frame(frame);row.pack(fill='x',pady=(14,0))
         self.button(row,'打开数据目录',lambda:os.startfile(str(self.directory)))
-        self.button(row,'导出词汇表',self.export_glossary)
+        self.button(row,'导出词表与语料',self.export_glossary)
 
     def export_glossary(self):
         if self.busy:return
@@ -459,7 +460,7 @@ class App:
             self.write_log('词汇表已导出：'+str(path))
             os.startfile(str(path))
         directory=self.directory/'reports'/('词汇表-'+time.strftime('%Y%m%d-%H%M%S'))
-        self.run(lambda:export_language(self.scan,directory),done,'导出词汇表')
+        self.run(lambda:export_language(self.scan,directory),done,'导出词表与语料')
 
     def toggle_log(self):
         self.log_open=not self.log_open
