@@ -7,6 +7,7 @@ from .core import (BridgeError,TOKENS,HAN,flatten,stable_id,validate_translation
                    classify,language_files,read_json)
 from .proper_names import names as protected_names
 from .resource_schema import rpg_kind
+from .lexicon import reserved
 from .status_terms import align_status_terms,status_slot,rank_file
 
 PRIMARY={'character','personality','enemy','ego','skill','passive','announcer',
@@ -186,6 +187,7 @@ def _relevant(text,index):
 
 
 def _reference_allowed(entry,source,term):
+    if reserved(source):return False
     if source==entry.source and entry.field in NAME_FIELDS:return True
     quoted=any(m.group(1).strip()==source for m in QUOTE.finditer(_plain(entry.source)))
     narrative=(entry.file.lower().startswith(('storydata/','rpgsystem/','personalityvoicedlg/','battleannouncerdlg/'))
@@ -227,7 +229,7 @@ def _replace_prose(entry,terms,reverse,issues,term_index=None):
         if len(left)==len(right) and len(left)>1:
             for a,b in zip(left,right):
                 term=terms.get(a.group().strip())
-                if term and b.group().strip()!=term['translation'] and not TOKENS.search(b.group()):
+                if term and not reserved(a.group().strip()) and b.group().strip()!=term['translation'] and not TOKENS.search(b.group()):
                     leading=len(b.group())-len(b.group().lstrip())
                     trailing=len(b.group())-len(b.group().rstrip())
                     replacements.append((b.start()+leading,b.end()-trailing,term['translation']))
@@ -363,6 +365,8 @@ def align_translations(scan):
     # Recompute current canonical labels after composite labels were repaired.
     scan.consistency_terms={s:{'source':s,'translation':t['translation'],'role':t['role']} for s,t in terms.items()}
     scan.consistency_term_index=_term_index(scan.consistency_terms)
+    from .language_knowledge import align_language
+    align_language(scan,issues)
     seen=set();unique=[]
     for issue in issues:
         key=json.dumps(issue,sort_keys=True,ensure_ascii=False)
@@ -387,6 +391,17 @@ def locked_terms(scan,entry):
     for source in _references(entry,scan.consistency_terms,scan.consistency_term_index):
         term=scan.consistency_terms[source]
         result[source]=term['translation']
+    from .language_knowledge import knowledge
+    reviewed=knowledge(scan).locks(entry)
+    # A complete, identified human name wins over a generic concept inside it.
+    # Keep the concept if another occurrence lies outside that full name.
+    for source,value in reviewed.items():
+        matches=_matches(_plain(entry.source),source)
+        enclosing=[(m.start(),m.end()) for outer in result if len(outer)>len(source)
+                   for m in _matches(_plain(entry.source),outer)]
+        if matches and all(any(a<=m.start() and m.end()<=b for a,b in enclosing) for m in matches):
+            continue
+        result[source]=value
     return result
 
 def export_consistency_report(scan,directory):

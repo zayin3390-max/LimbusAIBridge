@@ -222,7 +222,7 @@ class ConsistencyTests(Fixture):
         e=self.pick(s,'StoryData/S1.json','content')
         self.save(e,'辛克莱面色惨白，向经理老哥询问总部。')
         align_translations(s)
-        self.assertEqual(locked_terms(s,e),{})
+        self.assertEqual(locked_terms(s,e),{'Sinclair':'辛克莱'})
         self.assertFalse(e.consistency_note)
         from bridge.provider import build_glossary,relevant_glossary
         self.assertEqual(relevant_glossary(build_glossary(s),[e],s),{})

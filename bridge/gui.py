@@ -51,6 +51,13 @@ Hana、Zwei、Tres、Shi、Cinq、Liu、Devyat'、Dieci、Öufi 等按原文拼�
 人格：名字、主动/被动技能、背景剧情和语音文本。E.G.O：名称、觉醒/侵蚀技能、被动及语音。敌方：名字、技能、被动与观察记录。另含主线文本与卡池说明。本工具只处理官方导出的文本 JSON，不识别图片里的文字，不改图像或游戏逻辑。
 引擎关键词、富文本、变量、换行及数字会校验；不通过的条目不会进入生成包。校验只能保证部分格式和数字，不能保证语义正确，尤其应核对技能条件。AI 会参考本机的韩文/日文和零协会已有术语。
 
+词汇表与角色语气
+
+内置 80 个核心术语及 15 位主要角色的语气规则。战斗 Coin 使用“硬币”，Golden Bough 使用“金枝”；饰品、章节货币和普通词义分开处理。孤立饰品名不会直接成为其他文件中普通词语的译法。当前说话人由对白字段或专属语音文件判断，不靠一句话提到了谁来猜测。
+良秀的缩写会从本地零协会汉化中读取对应范例，并附上当前前后台词。只有同一完整原句的已知缩写直接锁定；新场景中的缩写需结合韩日参考，进入“译名待核对”。单独一个尚无释义的缩写先留待人工确认，不反复消耗 API 请求。角色语气服从当段情绪、人格及剧情阶段，不强加口癖。
+扫描和生成包时会修正现有 AI 缓存中能明确识别的术语错译；原始缓存、手动审校和零协会原包保留。其它可疑译法仅提示核对，不能保证全部语义正确。
+在“帮助”点击“导出词汇表”，或使用“导出报告”，可获得词表 Markdown、CSV 和本地良秀缩写候选。无扫描时只导出内置规则；扫描后附上本地缩写资料。数据目录中的 glossary.json 可指定个人译法，重扫后应用。完整词表见同包“边狱巴士词汇表.md”。
+
 自动重试
 
 网络中断、超时、限流和服务器临时故障会自动等待后重试，默认最多 10 次（不含首次请求）。等待逐步增加，通常不超过 60 秒；服务返回更长等待时间时遵照其提示。日志显示重试进度，可随时点击“停止”取消等待。
@@ -438,6 +445,16 @@ class App:
             box=self.text_box(page,20);box.insert('1.0',content);box.configure(state='disabled')
         row=ttk.Frame(frame);row.pack(fill='x',pady=(14,0))
         self.button(row,'打开数据目录',lambda:os.startfile(str(self.directory)))
+        self.button(row,'导出词汇表',self.export_glossary)
+
+    def export_glossary(self):
+        if self.busy:return
+        from .language_knowledge import export_language
+        def done(path):
+            self.write_log('词汇表已导出：'+str(path))
+            os.startfile(str(path))
+        directory=self.directory/'reports'/('词汇表-'+time.strftime('%Y%m%d-%H%M%S'))
+        self.run(lambda:export_language(self.scan,directory),done,'导出词汇表')
 
     def toggle_log(self):
         self.log_open=not self.log_open

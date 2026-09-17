@@ -24,7 +24,7 @@ from .resource_schema import rpg_kind, rpg_text_field, rpg_hidden_row
 
 PACK_NAME = 'LimbusAI_zh-CN'
 OWNER = 'limbus-ai-bridge-v1'
-PACK_RULES_VERSION = 3
+PACK_RULES_VERSION = 4
 MARKER = '.limbus-ai-bridge.json'
 TEXT_FIELDS = set('teller dialog title prevDesc eventDesc behaveDesc successDesc failureDesc content name clue story desc subDesc message messageDesc result dlg summary undefined flavor mainText subText text rawDesc description abnormalityName simpleDesc sentence add min specialName panicName lowMoraleDescription panicDescription nameWithTitle skinItemTitle skinItemDesc teacher longName shortName nickName abName company area chapter chaptertitle timeline place parttitle openCondition relatedChapterText askLevelUp openConditionNumber'.split())
 TECH_FIELDS = set('id key usage codeName iconId iconID variation variation2 colorCode outlineColorCode mainTextColor mainTextGlowColor debugNodeId debugNodeID songWriter keywords chapterNumber imgStr model'.split())
@@ -354,6 +354,7 @@ class Scan:
     consistency_conflicts: list = field(default_factory=list)
     consistency_glossary_path: Any = None
     consistency_blocked: set = field(default_factory=set)
+    language_knowledge: Any = field(default=None,repr=False)
 
     def summary(self):
         return {'source_files': len(self.sources), 'baseline_files': len(self.bases), 'version': self.version,
@@ -795,6 +796,8 @@ def export_report(scan, data_dir):
     atomic_write(directory/'scan.csv',buf.getvalue().encode('utf-8-sig'))
     from .consistency import export_consistency_report
     export_consistency_report(scan,directory)
+    from .language_knowledge import export_language
+    export_language(scan,directory)
     return directory
 
 def detect_game():
