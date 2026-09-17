@@ -362,3 +362,16 @@ class ConsistencyTests(Fixture):
         align_translations(s)
         self.assertEqual(e.translation,'西西弗百货商店授予西西弗之刑。')
         self.assertFalse(e.consistency_note)
+
+
+    def test_repeated_pending_names_pay_for_one_reference_identity(self):
+        self.source('ScenarioModelCodes.json',[{'id':1,'name':'Dubois'},{'id':2,'name':'Dubois'}],
+                    kr=[{'id':1,'name':'뒤부아'},{'id':2,'name':'뒤부아'}])
+        self.source('StoryData/S1.json',[{'id':1,'content':'Dubois arrived.'}])
+        s=self.scan()
+        from bridge.consistency import name_dependencies
+        names=name_dependencies(s.entries,s)
+        self.assertEqual(len(names),1)
+        self.save(names[0],'杜布瓦')
+        align_translations(s)
+        self.assertTrue(all(e.status=='cached' for e in s.entries if e.source=='Dubois'))

@@ -451,4 +451,14 @@ def name_dependencies(entries,scan):
     index=_term_index(terms);needed=set()
     for e in pending.values():
         if e.uid not in definitions:needed.update(_references(e,terms,index))
-    return [e for e in definitions.values() if e.source in needed]
+    # Labels with equal source and reference-language identity will be reused
+    # by align_translations after the first phase. Pay for one representative.
+    slots={slot['uid']:slot for slot in scan.consistency_index['slots']}
+    result=[];seen=set()
+    for e in definitions.values():
+        if e.source not in needed:continue
+        slot=slots[e.uid];refs=slot.get('refs')
+        identity=(slot['role'],e.source,refs) if refs else ('uid',e.uid)
+        if identity not in seen:
+            result.append(e);seen.add(identity)
+    return result

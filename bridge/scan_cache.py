@@ -10,7 +10,7 @@ from .core import Scan,Entry,BridgeError,atomic_write
 
 FORMAT = 1
 # Increment when scan classification changes, independently of UI/app versions.
-SCAN_RULES = 1
+SCAN_RULES = 2
 NAME = 'scan-cache.json.gz'
 FIELDS = ('source_lang','sources','bases','fingerprints','warnings','version','signature',
           'preserved','exclusions','resource_groups','status_alignment_changes','status_alignment_conflicts',
@@ -35,6 +35,12 @@ def translation_stamp(directory):
             digest.update(json.dumps(row,ensure_ascii=False,separators=(',',':')).encode('utf-8'))
             digest.update(b'\n')
     finally:connection.close()
+    # Local glossary/review edits alter derived names without changing the DB.
+    # Only these small local files are read; never traverse the game on startup.
+    for name in ('glossary.json','reviewed-abbreviations.json'):
+        local=pathlib.Path(directory)/name
+        digest.update(name.encode('utf-8'))
+        if local.is_file():digest.update(local.read_bytes())
     return digest.hexdigest()
 
 def save_scan(scan,directory):

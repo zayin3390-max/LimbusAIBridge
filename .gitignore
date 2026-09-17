@@ -51,3 +51,9 @@
 !/LimbusAIBridge-1.2.2.spec
 
 !/LimbusAIBridge-1.2.3.spec
+
+!/LimbusAIBridge-1.2.4.spec
+
+**/reviewed-abbreviations.json
+
+**/scan-cache.json.gz

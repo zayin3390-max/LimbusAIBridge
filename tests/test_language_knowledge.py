@@ -24,6 +24,24 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(repair_known_aliases(combat,'将铜钱转化为不可摧毁的硬币。铜钱威力+2'),
                          '将硬币转化为不可摧毁的硬币。硬币威力+2')
 
+    def test_count_as_is_not_locked_to_status_stacks(self):
+        e=entry('Gain [Breath] Count. This does not count as damage.')
+        locks=term_locks(e)
+        self.assertNotIn('count',locks)
+        self.assertNotIn('Count',locks)
+        self.assertEqual(term_locks(entry('Count','BattleKeywords.json','name')),{'Count':'层数'})
+
+    def test_count_unit_can_precede_status_tag_in_chinese(self):
+        e=entry('Gain 3 [Breath] Count.')
+        masked,tokens=protect(e.source,numbers=True,terms=term_locks(e))
+        text=restore('获得⟦P0000⟧层⟦P0001⟧。',tokens)
+        self.assertEqual(text,'获得3层[Breath]。')
+
+    def test_lowercase_golden_bough_is_recognized(self):
+        e=entry('Bring the golden bough.','StoryData/new.json','content')
+        self.assertEqual(term_locks(e),{'golden bough':'金枝'})
+        self.assertEqual(repair_known_aliases(e,'带上黄金枝。'),'带上金枝。')
+
     def test_gold_bough_alias_corrected_only_with_source_evidence(self):
         e=entry('Bring the Golden Boughs.','StoryData/new.json','content')
         self.assertEqual(repair_known_aliases(e,'带上黄金枝。'),'带上金枝。')

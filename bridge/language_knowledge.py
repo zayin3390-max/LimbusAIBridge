@@ -69,6 +69,14 @@ def _get(tree,path):
     except (KeyError,IndexError,TypeError):
         return None
 
+def dialogue_id(file,tree,path,parent):
+    value=parent.get('id',parent.get('key',parent.get('index','')))
+    if file.casefold().startswith('rpgsystem/') and len(path)>1:
+        block=_get(tree,path[:2])
+        if isinstance(block,dict) and block.get('key'):
+            return str(block['key'])+'/'+str(value)
+    return value
+
 class LanguageKnowledge:
     def __init__(self,scan):
         self.scan=scan
@@ -76,6 +84,8 @@ class LanguageKnowledge:
         self.shortforms=collections.defaultdict(list)
         self.exact=collections.defaultdict(list)
         self.custom={}
+        from .scoped_review import load
+        self.reviewed_abbreviations=load(scan.consistency_glossary_path)
         if scan.consistency_glossary_path:
             try:
                 data=json.loads(pathlib.Path(scan.consistency_glossary_path).read_text(encoding='utf-8-sig'))
@@ -102,7 +112,7 @@ class LanguageKnowledge:
                 try:validate_translation(text,target)
                 except BridgeError:continue
                 row={'source':text,'translation':target,'file':rel,'path':list(path),
-                     'row_id':parent.get('id',parent.get('key','')),
+                     'row_id':dialogue_id(rel,tree,path,parent),
                      'variant':variant(rel),'model':str(parent.get('model',''))}
                 if len(text)<=320 and len(target)<=320:
                     self.examples[who].append(row)
@@ -152,6 +162,8 @@ class LanguageKnowledge:
 
     def locks(self,entry):
         result=term_locks(entry)
+        from .scoped_review import short_name_locks
+        result.update(short_name_locks(self.scan,entry))
         for source in list(result):
             custom=self.custom.get(source)
             if custom:
@@ -167,11 +179,16 @@ class LanguageKnowledge:
                     targets={r['short_form'] for r in self.shortforms.get(code,[]) if r['source']==entry.source}
                     if len(targets)==1:
                         result[code]=next(iter(targets))
+            from .scoped_review import locks
+            result.update(locks(self.reviewed_abbreviations,entry,self.neighbors(entry),acronyms(entry.source)))
         return result
 
     def guidance(self,entry):
         who=self.actor(entry)
         result={'terminology':self.locks(entry)}
+        from .lexicon import selected_terms
+        if any(term.aliases[0]=='Count' for _,term in selected_terms(entry)):
+            result['usage_notes']=['Count 指状态属性时译“层数”，数量修饰状态时用“层”，如数字后接“层”再接状态标签；count as 译“算作／视为”，数硬币等对象时译“数量”。按当前句义判断，不添加原文没有的单位。']
         if entry.file.casefold() in SCENE_NOTES and narrative(entry):
             result['scene_style_note']=SCENE_NOTES[entry.file.casefold()]
             result['dialogue_context']=self.neighbors(entry)
@@ -183,7 +200,7 @@ class LanguageKnowledge:
             'priority':'当段原文、人称、情绪、人格和剧情阶段优先；语气规则不能改变事实，也不能补写口癖。'}
         parent=self.parent(entry) or {}
         result.update(self.dialogue.select(who,entry.source,entry.file,
-                      parent.get('id',parent.get('key',''))))
+                      dialogue_id(entry.file,self.scan.sources.get(entry.file.casefold(),{}),entry.path,parent)))
         if who=='ryoshu' and acronyms(entry.source):
             result['dialogue_context']=self.neighbors(entry)
         else:

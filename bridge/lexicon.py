@@ -118,6 +118,7 @@ PROFILES = {
 }
 
 SENSE_NOTES = {
+    'Count': '状态属性是“层数”，数量修饰状态时可译“层”；count as 是“算作”，硬币等对象的 count 是“数量”。句中不对这个多义词强制保护标记，以保留中文语序。',
     'Coin / Coins': '战斗掷币、硬币威力：硬币；特定饰品或章节货币的“铜钱”须保留其条目自己的译名。',
     'Wings / Wing': '都市企业语境按本地译文使用“世界之翼／翼”；生物部位是“翅膀／翼”。不得跨语境套用。',
     'Thread': '游戏养成资源是“纺锤”；缝纫线、线索等普通叙事另按上下文翻译。',
@@ -144,7 +145,7 @@ def narrative(entry):
 def _pattern(alias, case_sensitive=False):
     return re.compile(r'(?<![\w])'+re.escape(alias)+r'(?![\w])', 0 if case_sensitive else re.I)
 
-_MATCHERS = [(t,a,_pattern(a,t.scope=='proper')) for t in TERMS for a in t.aliases]
+_MATCHERS = [(t,a,_pattern(a,t.scope=='proper' and t.zh!='金枝')) for t in TERMS for a in t.aliases]
 
 def applicable(term, entry):
     name = entry.file.rsplit('/',1)[-1]
@@ -183,7 +184,11 @@ def selected_terms(entry):
     return result
 
 def term_locks(entry):
-    return {source:term.zh for source,term in selected_terms(entry)}
+    # Count changes grammatical form: '3 [Burn] Count' -> '3层[Burn]',
+    # while 'does not count as' is a verb. A fixed ordered term marker would
+    # force an unnatural word order or a wrong sense. Only lock a standalone label.
+    return {source:term.zh for source,term in selected_terms(entry)
+            if term.aliases[0]!='Count' or entry.source.strip()==source}
 
 def repair_known_aliases(entry, text, overrides=None):
     from .core import TOKENS,validate_translation,BridgeError

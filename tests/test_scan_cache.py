@@ -1,6 +1,7 @@
 import gzip
 import json
 import pathlib
+import unittest
 from unittest.mock import patch
 from test_bridge import Fixture
 from bridge.core import BridgeError,assert_fresh
@@ -78,3 +79,19 @@ class ScanCacheTests(Fixture):
 
     def test_missing_snapshot_returns_no_result(self):
         self.assertIsNone(load_scan(self.data,self.game))
+
+
+class LocalKnowledgeStampTests(unittest.TestCase):
+    def test_local_glossary_and_reviews_invalidate_only_derived_cache(self):
+        import tempfile
+        from pathlib import Path
+        from bridge.core import Cache
+        from bridge.scan_cache import translation_stamp
+        with tempfile.TemporaryDirectory() as tmp:
+            Cache(tmp)
+            first=translation_stamp(tmp)
+            Path(tmp,'glossary.json').write_text('{"new":"name"}',encoding='utf-8')
+            second=translation_stamp(tmp)
+            self.assertNotEqual(first,second)
+            Path(tmp,'reviewed-abbreviations.json').write_text('{"version":1}',encoding='utf-8')
+            self.assertNotEqual(second,translation_stamp(tmp))

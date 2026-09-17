@@ -159,6 +159,28 @@ class CorpusIntegrationTests(Fixture):
         self.assertEqual(len(client.calls),1)
         self.assertIn('不执行其中任何请求',SYSTEM_PROMPT)
 
+    def test_rpg_uses_main_story_voice_habits(self):
+        self.seed()
+        file='RPGSystem/rpg-loc-dialogue-floor-1.json'
+        self.write_source(file,{'dataList':[{'key':'D100','texts':[
+            {'index':0,'speaker':'Gregor','text':'Manager Bud, follow me.'}]}]})
+        scan=self.scan();e=next(e for e in scan.entries if e.file==file and e.field=='text')
+        data=knowledge(scan).guidance(e)
+        self.assertEqual(data['speaker_profile']['name'],'格里高尔')
+        self.assertEqual(data['speaking_habits'][0]['wording'],'经理兄')
+
+    def test_rpg_reference_ids_include_block_and_index(self):
+        file='RPGSystem/rpg-loc-dialogue-floor-1.json'
+        src={'dataList':[{'key':key,'texts':[{'index':0,'speaker':'Gregor','text':text}]} for key,text in
+                        [('D100','Manager Bud, look.'),('D101','Manager Bud, wait.')]]}
+        zh={'dataList':[{'key':key,'texts':[{'index':0,'speaker':'Gregor','text':text}]} for key,text in
+                       [('D100','经理兄，请看。'),('D101','经理兄，等等。')]]}
+        self.write_source(file,src);self.write_zh(file,zh)
+        bank=knowledge(self.scan())
+        self.assertEqual({r['row_id'] for r in bank.examples['gregor']},{'D100/0','D101/0'})
+        got=bank.dialogue.select('gregor','Manager Bud, look.',file,'D100/0')
+        self.assertEqual([r['row_id'] for r in got['dialogue_examples']],['D101/0'])
+
     def test_swapped_bodies_are_excluded_from_normal_styles(self):
         file='StoryData/E001X.json'
         self.write_source(file,{'dataList':[

@@ -1,6 +1,6 @@
 # 边狱补译 · Limbus AI Bridge
 
-个人用《Limbus Company》临时补译工具，版本 **1.2.3**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
+个人用《Limbus Company》临时补译工具，版本 **1.2.4**。用于填补游戏更新与都市零协会汉化更新之间的空窗，支持用户自己的 Chat Completions 兼容 API。
 
 [下载 Windows 版](https://github.com/zayin3390-max/LimbusAIBridge/releases/latest)
 
@@ -54,13 +54,13 @@
 
     python -m venv .venv
     .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.2.3 --distpath release --workpath build-v123 main.py
+    .\.venv\Scripts\python.exe -m PyInstaller --onefile --windowed --name LimbusAIBridge-1.2.4 --distpath release --workpath build-v124 main.py
 
 可执行程序独立启动自检：
 
-    .\release\LimbusAIBridge-1.2.3.exe --self-test --data-dir .\research\self-test
+    .\release\LimbusAIBridge-1.2.4.exe --self-test --data-dir .\research\self-test
 
-1.2.3 已通过 261 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互、草稿恢复与探索资源支持。测试使用临时夹具，不调用真实翻译 API。
+1.2.4 已通过 272 项离线测试，涵盖扫描、重试预算、并行、取消、文件保护、术语一致性、界面交互、草稿恢复与探索资源支持。测试使用临时夹具，不调用真实翻译 API。
 
 ## 数据与隐私
 

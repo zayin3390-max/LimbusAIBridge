@@ -115,6 +115,7 @@ def variant(file):
         m=re.search(r'_(\d{5,})$',stem)
         return 'identity:'+m[1] if m else 'file:'+file
     if file.startswith(('egovoicedig/','egovoicedlg/')):return 'ego:'+stem
+    if file.startswith('rpgsystem/'):return 'story'
     if file.startswith('storydata/'):
         m=re.fullmatch(r'p(\d{5,})[a-z]*',stem)
         return 'identity:'+m[1] if m else 'story'
