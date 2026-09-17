@@ -1,0 +1,2 @@
+# Only needed to build the Windows executable; the app uses the Python standard library.
+pyinstaller==6.22.3
