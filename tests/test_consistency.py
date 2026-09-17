@@ -1,3 +1,4 @@
+import unittest
 import copy
 import json
 from unittest.mock import patch
@@ -350,6 +351,8 @@ class ConsistencyTests(Fixture):
         align_translations(s)
         self.assertFalse(e.consistency_note)
         self.assertEqual(e.translation,'击败猩红之神[新形态]的血肉。')
+        from bridge.language_knowledge import validate_terms
+        validate_terms(s,e,e.translation)
 
 
     def test_short_correct_name_does_not_block_a_longer_name_correction(self):
@@ -375,3 +378,58 @@ class ConsistencyTests(Fixture):
         self.save(names[0],'杜布瓦')
         align_translations(s)
         self.assertTrue(all(e.status=='cached' for e in s.entries if e.source=='Dubois'))
+
+
+    def test_partial_reference_name_joins_unique_complete_signature(self):
+        self.source('ScenarioModelCodes_auto.json',[{'id':1,'name':'Dorian'}],kr=[{'id':1,'name':'도리안'}])
+        self.source('Enemies_new.json',[{'id':2,'name':'Dorian'}],kr=[{'id':2,'name':'도리안'}])
+        self.write_source('Enemies_new.json',{'dataList':[{'id':2,'name':'ドリアン'}]},lang='jp')
+        self.source('StoryData/S1.json',[{'id':1,'content':'Dorian arrived.'}])
+        s=self.scan();first=self.pick(s,'ScenarioModelCodes_auto.json');second=self.pick(s,'Enemies_new.json')
+        self.save(first,'多利安');self.save(second,'道林')
+        align_translations(s)
+        self.assertEqual(first.translation,second.translation)
+        self.assertIn('Dorian',s.consistency_terms)
+        self.assertEqual(locked_terms(s,self.pick(s,'StoryData/S1.json','content')),{'Dorian':second.translation})
+
+    def test_partial_reference_does_not_bridge_conflicting_supersets(self):
+        self.source('ScenarioModelCodes_auto.json',[{'id':1,'name':'Dorian'}],kr=[{'id':1,'name':'도리안'}])
+        self.source('Enemies_new.json',[{'id':2,'name':'Dorian'},{'id':3,'name':'Dorian'}],kr=[{'id':2,'name':'도리안'},{'id':3,'name':'도리안'}])
+        self.write_source('Enemies_new.json',{'dataList':[{'id':2,'name':'ドリアン甲'},{'id':3,'name':'ドリアン乙'}]},lang='jp')
+        s=self.scan()
+        self.save(self.pick(s,'ScenarioModelCodes_auto.json'),'待确认人名')
+        self.save(self.pick(s,'Enemies_new.json',row=2),'多利安甲')
+        self.save(self.pick(s,'Enemies_new.json',row=3),'多利安乙')
+        align_translations(s)
+        self.assertNotIn('Dorian',s.consistency_terms)
+        self.assertEqual(self.pick(s,'ScenarioModelCodes_auto.json').translation,'待确认人名')
+
+
+    def test_exploration_location_label_is_reused_in_prose(self):
+        file='RPGSystem/rpg-loc-location-test.json'
+        self.source(file,[{'key':'L1','text':'Maison du Noir'}],kr=[{'key':'L1','text':'르누아르 메종'}])
+        self.source('StoryData/S1.json',[{'id':1,'content':'Return to Maison du Noir.'}])
+        s=self.scan();place=next(e for e in s.entries if e.file==file)
+        self.save(place,'黑之宅邸');align_translations(s)
+        body=self.pick(s,'StoryData/S1.json','content')
+        self.assertEqual(locked_terms(s,body),{'Maison du Noir':'黑之宅邸'})
+
+class UnquotedStatusReferenceTests(unittest.TestCase):
+    def test_multiword_status_in_mechanics_but_not_ordinary_dialogue(self):
+        from types import SimpleNamespace
+        from bridge.consistency import _reference_allowed
+        term={'role':'status'}
+        combat=SimpleNamespace(source='Convert into Awakened Armor next turn.',field='desc',file='BattleKeywords.json')
+        self.assertTrue(_reference_allowed(combat,'Awakened Armor',term))
+        story=SimpleNamespace(source='I had Sweet Dreams.',field='content',file='StoryData/test.json')
+        self.assertFalse(_reference_allowed(story,'Sweet Dreams',term))
+        self.assertFalse(_reference_allowed(combat,'Binding',term))
+
+    def test_shorter_status_does_not_capture_inside_core_concept(self):
+        from types import SimpleNamespace
+        from bridge.consistency import _references,_term_index
+        terms={'Power Up':{'role':'status'}}
+        e=SimpleNamespace(source='Gain Attack Power Up.',field='desc',file='Skills_test.json')
+        self.assertEqual(_references(e,terms,_term_index(terms)),[])
+        e.source='Gain Attack Power Up and Power Up.'
+        self.assertEqual(_references(e,terms,_term_index(terms)),['Power Up'])

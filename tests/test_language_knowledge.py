@@ -126,6 +126,18 @@ class LanguageKnowledgeTests(Fixture):
         s,e=self.target('Hey, B.G. Light it.','싱클레어')
         self.assertNotIn('B.G.',locked_terms(s,e))
 
+    def test_reviewed_acronym_quote_applies_to_sinclair_only_in_its_scene(self):
+        from bridge.scoped_review import context_hash
+        s,e=self.target('She would call it D.R.A.B.','싱클레어')
+        bank=knowledge(s)
+        bank.reviewed_abbreviations[e.uid]=dict(
+            source_hash=e.cache_hash,context_hash=context_hash(e,bank.neighbors(e)),
+            evidence='The next line explicitly explains the four initials.',
+            locks={'D.R.A.B.':'乏·善·可·陈'})
+        self.assertEqual(bank.locks(e).get('D.R.A.B.'),'乏·善·可·陈')
+        s.sources[e.file.casefold()]['dataList'][1]['content']='A different explanation.'
+        self.assertNotIn('D.R.A.B.',bank.locks(e))
+
     def test_conflicting_local_acronym_candidates_stay_separate(self):
         source,human=self.seed_dialogue()
         source['dataList'].append({'id':4,'model':'료슈','content':'B.G. The gate.'})

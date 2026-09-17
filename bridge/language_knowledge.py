@@ -179,8 +179,9 @@ class LanguageKnowledge:
                     targets={r['short_form'] for r in self.shortforms.get(code,[]) if r['source']==entry.source}
                     if len(targets)==1:
                         result[code]=next(iter(targets))
-            from .scoped_review import locks
-            result.update(locks(self.reviewed_abbreviations,entry,self.neighbors(entry),acronyms(entry.source)))
+        # A reviewed quotation may be spoken by Sinclair or the narrator.
+        from .scoped_review import locks
+        result.update(locks(self.reviewed_abbreviations,entry,self.neighbors(entry),acronyms(entry.source)))
         return result
 
     def guidance(self,entry):
@@ -253,11 +254,11 @@ def knowledge(scan):
     return scan.language_knowledge
 
 def validate_terms(scan,entry,text):
-    from .consistency import locked_terms
+    from .consistency import locked_terms,_contains_name
     expected=locked_terms(scan,entry)
     plain=TOKENS.sub('',text)
     missing=[f'{s} → {z}' for s,z in expected.items()
-             if z not in plain or knowledge(scan).wrong_alias(entry,s,text)]
+             if not _contains_name(plain,entry.source,s,z) or knowledge(scan).wrong_alias(entry,s,text)]
     if missing:
         raise BridgeError('术语校验未通过：'+'；'.join(missing[:6]))
 

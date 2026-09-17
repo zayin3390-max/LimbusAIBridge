@@ -49,6 +49,9 @@ def short_name_locks(scan,entry):
         if not term or not any(cue in refs for cue in evidence):continue
         # The full name already has its own canonical reference mechanism.
         text=entry.source.replace(canonical,'')
+        # French establishment names retain their own complete translation;
+        # du Noir/du Rouge is not a freestanding faction abbreviation.
+        text=re.sub(r'\bdu (?:Noir|Rouge)\b','',text)
         for alias in aliases:
             if re.search(r'(?<![A-Za-z])'+re.escape(alias)+r'(?![A-Za-z])',text):
                 result[alias]=term['translation']

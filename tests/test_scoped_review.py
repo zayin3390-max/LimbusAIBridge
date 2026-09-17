@@ -32,3 +32,11 @@ class ScopedReviewTests(unittest.TestCase):
         self.assertEqual(short_name_locks(scan,self.e),{})
         self.e.source='Le Rouge';self.e.refs={'kr':'르루주'}
         self.assertEqual(short_name_locks(scan,self.e),{})
+
+
+    def test_establishment_name_does_not_force_faction_component(self):
+        scan=SimpleNamespace(consistency_terms={'Le Noir':{'translation':'勒努瓦'},'Le Rouge':{'translation':'勒鲁日'}})
+        self.e.source='Maison du Noir';self.e.refs={'kr':'르누아르'}
+        self.assertEqual(short_name_locks(scan,self.e),{})
+        self.e.source='A Rouge walked into Boutique du Rouge.';self.e.refs={'kr':'르루주'}
+        self.assertEqual(short_name_locks(scan,self.e),{'Rouge':'勒鲁日'})
